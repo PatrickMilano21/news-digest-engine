@@ -1,0 +1,10 @@
+<rss>
+  <channel>
+    <title>Example Feed</title>
+    <item>
+      <title>Test Item</title>
+      <link>https://example.com/test</link>
+      <pubDate>Mon, 01 Jan 2026 00:00:00 GMT</pubDate>
+    </item>
+  </channel>
+</rss>

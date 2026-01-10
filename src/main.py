@@ -41,7 +41,7 @@ async def http_exception_handler(request: Request, exc: HTTPException):
         request_id=rid,
     )
     log_event("http_error", request_id=rid, status=exc.status_code, message=str(exc.detail))
-    resp = JSONResponse(status_code=exc.status_code, content=payload.model_dump())
+    resp = JSONResponse(status_code=exc.status_code, content=payload.model_dump(exclude_none=True))
     resp.headers["X-Request-ID"] = rid
     return resp
 
@@ -57,6 +57,6 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     )
     # Don't leak details to the client, but do log them
     log_event("internal_error", request_id=rid, error_type=type(exc).__name__)
-    resp = JSONResponse(status_code=500, content=payload.model_dump())
+    resp = JSONResponse(status_code=500, content=payload.model_dump(exclude_none=True))
     resp.headers["X-Request-ID"] = rid
     return resp

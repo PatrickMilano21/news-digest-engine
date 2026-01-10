@@ -1,5 +1,8 @@
 import argparse
+import uuid
 from datetime import date
+
+from src.logging_utils import log_event
 
 
 def main() -> int:
@@ -9,7 +12,13 @@ def main() -> int:
 
     date.fromisoformat(args.date)
 
-    print(f"[EVAL] date={args.date} score=1.00 (placeholder)")
+    run_id = uuid.uuid4().hex
+
+    log_event("eval_started", run_id=run_id, date=args.date)
+
+    print(f"[EVAL] date={args.date} run_id={run_id} score=1.00 (placeholder)")
+
+    log_event("eval_finished", run_id=run_id, date=args.date, score=1.00)
     return 0
 
 

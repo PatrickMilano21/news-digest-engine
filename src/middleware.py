@@ -9,10 +9,12 @@ async def request_id_middleware(request: Request, call_next):
     #2. Attach it to the request state (lives for this request only)
     request.state.request_id = request_id
 
-    #3Let the request continue through the rest of the app
+    #3. Let the request continue through the rest of the app
     response = await call_next(request)
 
     #4. Add the request ID to the response headers
     response.headers['X-Request-ID'] = request_id
+    
 
+    
     return response

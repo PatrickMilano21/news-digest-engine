@@ -13,3 +13,5 @@ def test_health():
     assert resp.status_code == 200
     # Assert that the JSON response body matches the expected health check format
     assert resp.json() == {"status": "ok"}
+
+

@@ -41,3 +41,64 @@ def insert_news_items(conn: sqlite3.Connection,items: list[NewsItem]) -> dict:
     conn.commit()
     return {"inserted": inserted, "duplicates": duplicates}
 
+
+def start_run(conn: sqlite3.Connection, run_id: str, started_at: str, received: int) -> None:
+    conn.execute(
+        """
+        INSERT INTO runs (run_id, started_at, status, received)
+        VALUES (?, ?, ?, ?);
+        """,
+        (run_id, started_at, "started", received),
+    )
+    conn.commit()
+
+def finish_run_ok(conn: sqlite3.Connection, run_id: str, finished_at: str, *, after_dedupe: int, inserted: int, duplicates: int) -> None:
+    conn.execute(
+        """
+        UPDATE runs
+        SET finished_at = ?, status = ?, after_dedupe = ?, inserted = ?, duplicates = ?
+        WHERE run_id = ?
+        """,
+        (finished_at, "ok", after_dedupe, inserted, duplicates, run_id)
+    )
+    conn.commit()
+
+def finish_run_error(conn: sqlite3.Connection, run_id: str, finished_at: str, *, error_type: str, error_message: str) -> None:
+    conn.execute(
+        """
+        UPDATE runs
+        SET finished_at = ?, status = ?, error_type = ?, error_message = ?
+        WHERE run_id = ?
+        """,
+        (finished_at, "error", error_type, error_message, run_id)
+    )
+    conn.commit()
+
+
+def get_latest_run(conn: sqlite3.Connection) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT run_id, started_at, finished_at, status,
+               received, after_dedupe, inserted, duplicates,
+               error_type, error_message
+        FROM runs
+        ORDER BY started_at DESC
+        LIMIT 1;
+        """
+    ).fetchone()
+
+    if row is None:
+        return None
+    
+    return {
+        "run_id": row[0],
+        "started_at": row[1],
+        "finished_at": row[2],
+        "status": row[3],
+        "received": row[4],
+        "after_dedupe": row[5],
+        "inserted": row[6],
+        "duplicates": row[7],
+        "error_type": row[8],
+        "error_message": row[9],
+    }

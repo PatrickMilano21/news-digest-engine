@@ -1,3 +1,4 @@
+# src/db.py
 from __future__ import annotations
 
 import os
@@ -5,12 +6,9 @@ import sqlite3
 from pathlib import Path
 
 
-
-
-
-def get_conn() -> sqlit3.Connection:
+def get_conn() -> sqlite3.Connection:
     """
-    Open a SQLite connection to the DB path. 
+    Open a SQLite connection to the DB path.
     DB path is configured via NEWS_DB_PATH env var, with a safe local default.
     """
     db_path = os.environ.get("NEWS_DB_PATH", "./data/news.db")
@@ -24,7 +22,7 @@ def get_conn() -> sqlit3.Connection:
     return conn
 
 
-def init_db(conn: sqlit3.Connection) -> None:
+def init_db(conn: sqlite3.Connection) -> None:
     """
     Create required tables if they don't exist.
     """
@@ -42,4 +40,22 @@ def init_db(conn: sqlit3.Connection) -> None:
         );
         """
     )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS runs (
+            run_id TEXT PRIMARY KEY,
+            started_at TEXT NOT NULL,
+            finished_at TEXT,
+            status TEXT NOT NULL,
+            received INTEGER NOT NULL DEFAULT 0,
+            after_dedupe INTEGER NOT NULL DEFAULT 0,
+            inserted INTEGER NOT NULL DEFAULT 0,
+            duplicates INTEGER NOT NULL DEFAULT 0,
+            error_type TEXT,
+            error_message TEXT
+        );
+        """
+    )
+
     conn.commit()

@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime, timezone, date
 
 from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, HTMLResponse
 
 from src.middleware import request_id_middleware
 from src.logging_utils import log_event
@@ -10,10 +10,11 @@ from src.errors import problem
 
 from src.schemas import IngestRequest
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
-
+from src.artifacts import render_digest_html
+from src.explain import explain_item
 
 
 app = FastAPI()
@@ -126,6 +127,53 @@ def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
         "items": [it.model_dump() for it in ranked],
     }
 
+
+@app.get("/digest/{date_str}", response_class=HTMLResponse)
+def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
+    # 1) validate date + deterministic now
+    try:
+        day = date.fromisoformat(date_str).isoformat()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+
+    if top_n < 1:
+        raise HTTPException(status_code=400, detail="top_n must be >= 1")
+
+    now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
+
+    # 2) DB reads
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        run = get_run_by_day(conn, day=day)
+        items = get_news_items_by_date(conn, day=day)
+
+        # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
+        if run is None and not items:
+            raise HTTPException(status_code=404, detail="No data found for this day")
+
+        # 3) rank + explain (use default config for now)
+        cfg = RankConfig()
+        ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+        explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
+
+        # 4) render
+        html_text = render_digest_html(
+            day=day,
+            run=run,
+            ranked_items=ranked,
+            explanations=explanations,
+            cfg=cfg,
+            now=now,
+            top_n=top_n,
+        )
+        return HTMLResponse(content=html_text, status_code=200)
+
+    finally:
+        conn.close()
+
+        
 
 @app.get("/debug/http_error")
 def debug_http_error():

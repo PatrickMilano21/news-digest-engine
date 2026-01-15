@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 import uuid
+import argparse
 
+from src.logging_utils import log_event
 from src.db import get_conn, init_db
 from src.normalize import normalize_and_dedupe
 from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run
@@ -36,7 +38,7 @@ if __name__ == "__main__":
 
 def run_rss_ingest(*, feed_specs: list[tuple[str, str]], mode: str, fixtures_dir: str) -> dict:
     run_id = uuid.uuid4().hex
-    started_at = datetime.now(timezone.utc)
+    started_at = datetime.now(timezone.utc).isoformat()
 
     conn = get_conn()
     try:
@@ -69,7 +71,7 @@ def run_rss_ingest(*, feed_specs: list[tuple[str, str]], mode: str, fixtures_dir
             db_ignored = result["duplicates"]
             duplicates = python_dupes + db_ignored
 
-            finished_at = datetime.now(timezone.utc)
+            finished_at = datetime.now(timezone.utc).isoformat()
             finish_run_ok(
                 conn,
                 run_id,
@@ -88,11 +90,11 @@ def run_rss_ingest(*, feed_specs: list[tuple[str, str]], mode: str, fixtures_dir
             }
 
         except RSSFetchError as exc:
-            finished_at = datetime.now(timezone.utc)
+            finished_at = datetime.now(timezone.utc).isoformat()
             finish_run_error(conn, run_id, finished_at, error_type="RSS_FETCH_FAIL", error_message=str(exc))
             raise
         except RSSParseError as exc:
-            finished_at = datetime.now(timezone.utc)
+            finished_at = datetime.now(timezone.utc).isoformat()
             finish_run_error(conn, run_id, finished_at, error_type="RSS_PARSE_FAIL", error_message=str(exc))
             raise
 

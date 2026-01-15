@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, date
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -10,9 +10,9 @@ from src.errors import problem
 
 from src.schemas import IngestRequest
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date
 from src.normalize import normalize_and_dedupe
-
+from src.scoring import RankConfig, rank_items
 
 
 
@@ -96,6 +96,35 @@ def latest_run():
         raise HTTPException(status_code=404, detail="No runs found")
 
     return latest
+
+
+@app.post("/rank/{date_str}")
+def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
+    try:
+        date.fromisoformat(date_str)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format, expected YYYY-MM-DD")
+
+    if top_n < 1:
+        raise HTTPException(status_code=400, detail="top_n must be >= 1")
+
+    now = datetime.fromisoformat(f"{date_str}T23:59:59+00:00")
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+        items = get_news_items_by_date(conn, day=date_str)
+
+    finally:
+        conn.close()
+    
+    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+    return {
+        "date": date_str,
+        "top_n": top_n,
+        "count": len(ranked),
+        "items": [it.model_dump() for it in ranked],
+    }
 
 
 @app.get("/debug/http_error")

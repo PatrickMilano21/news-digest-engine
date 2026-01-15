@@ -42,7 +42,7 @@ def insert_news_items(conn: sqlite3.Connection,items: list[NewsItem]) -> dict:
     return {"inserted": inserted, "duplicates": duplicates}
 
 
-def start_run(conn: sqlite3.Connection, run_id: str, started_at: str, received: int) -> None:
+def start_run(conn: sqlite3.Connection, run_id: str, started_at: datetime, received: int) -> None:
     conn.execute(
         """
         INSERT INTO runs (run_id, started_at, status, received)
@@ -52,7 +52,7 @@ def start_run(conn: sqlite3.Connection, run_id: str, started_at: str, received: 
     )
     conn.commit()
 
-def finish_run_ok(conn: sqlite3.Connection, run_id: str, finished_at: str, *, after_dedupe: int, inserted: int, duplicates: int) -> None:
+def finish_run_ok(conn: sqlite3.Connection, run_id: str, finished_at: datetime, *, after_dedupe: int, inserted: int, duplicates: int) -> None:
     conn.execute(
         """
         UPDATE runs
@@ -63,7 +63,7 @@ def finish_run_ok(conn: sqlite3.Connection, run_id: str, finished_at: str, *, af
     )
     conn.commit()
 
-def finish_run_error(conn: sqlite3.Connection, run_id: str, finished_at: str, *, error_type: str, error_message: str) -> None:
+def finish_run_error(conn: sqlite3.Connection, run_id: str, finished_at: datetime, *, error_type: str, error_message: str) -> None:
     conn.execute(
         """
         UPDATE runs
@@ -102,3 +102,61 @@ def get_latest_run(conn: sqlite3.Connection) -> dict | None:
         "error_type": row[8],
         "error_message": row[9],
     }
+
+
+
+def report_runs_by_day(conn: sqlite3.Connection, *, limit: int = 7) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT
+            substr(started_at, 1, 10) AS day,
+            COUNT(*) AS runs,
+            COALESCE(SUM(received), 0) AS received,
+            COALESCE(SUM(inserted), 0) AS inserted,
+            COALESCE(SUM(duplicates), 0) AS duplicates
+        FROM runs
+        GROUP BY day
+        ORDER BY day DESC
+        LIMIT ?;
+        """,
+        (limit,),
+    ).fetchall()
+
+    out: list[dict] = []
+    for day, runs, received, inserted, duplicates in rows:
+        out.append(
+            {
+                "day": day,
+                "runs": runs,
+                "received": received,
+                "inserted": inserted,
+                "duplicates": duplicates,
+            }
+        )
+    return out
+
+
+def get_news_items_by_date(conn: sqlite3.Connection, *, day: str) -> list[NewsItem]:
+    rows = conn.execute(
+        """
+        SELECT source, url, published_at, title, evidence
+        FROM news_items
+        WHERE substr(published_at, 1, 10) = ?
+        ORDER BY published_at DESC, id DESC;
+        """,
+        (day,),
+    ).fetchall()
+
+    out: list[NewsItem] = []
+    for source, url, published_at, title, evidence in rows:
+        out.append(
+            NewsItem(
+                source=source,
+                url=url,
+                published_at=datetime.fromisoformat(published_at),
+                title=title,
+                evidence=evidence,
+            )
+        )
+
+    return out

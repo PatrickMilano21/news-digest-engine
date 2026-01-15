@@ -160,3 +160,52 @@ def get_news_items_by_date(conn: sqlite3.Connection, *, day: str) -> list[NewsIt
         )
 
     return out
+
+
+def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
+    """
+    Read-only. Return the most recent run row for a given YYYY-MM-DD day
+    based on started_at's first 10 chars (ISO date).
+    """
+    row = conn.execute(
+        """
+        SELECT run_id, started_at, finished_at, status,
+               received, after_dedupe, inserted, duplicates,
+               error_type, error_message
+        FROM runs
+        WHERE substr(started_at, 1, 10) = ?
+        ORDER BY started_at DESC
+        LIMIT 1;
+        """,
+        (day,),
+    ).fetchone()
+
+    if row is None:
+        return None
+    
+    return {
+        "run_id": row[0],
+        "started_at": row[1],
+        "finished_at": row[2],
+        "status": row[3],
+        "received": row[4],
+        "after_dedupe": row[5],
+        "inserted": row[6],
+        "duplicates": row[7],
+        "error_type": row[8],
+        "error_message": row[9],       
+    }
+
+def has_successful_run_for_day(conn, *, day: str) -> bool:
+    row = conn.execute(
+        """
+        SELECT 1
+        FROM runs
+        WHERE substr(started_at, 1, 10) = ?
+          AND status = 'ok'
+        LIMIT 1;
+        """,
+        (day,),
+    ).fetchone()
+
+    return row is not None

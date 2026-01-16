@@ -3,6 +3,7 @@ from datetime import datetime, timezone, date
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from src.middleware import request_id_middleware
 from src.logging_utils import log_event
@@ -10,7 +11,7 @@ from src.errors import problem
 
 from src.schemas import IngestRequest
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
@@ -18,6 +19,8 @@ from src.explain import explain_item
 
 
 app = FastAPI()
+
+app.mount("/artifacts", StaticFiles(directory="artifacts"), name = "artifacts")
 
 #Register middleware
 app.middleware("http")(request_id_middleware)
@@ -173,7 +176,65 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
     finally:
         conn.close()
 
-        
+@app.get("/ui/date/{date_str}", response_class=HTMLResponse)
+def ui_for_date(date_str: str) -> HTMLResponse:
+    try:
+        day = date.fromisoformat(date_str).isoformat()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+        run = get_run_by_day(conn, day=day)
+    finally:
+        conn.close()
+
+    digest_path = f"/artifacts/digest_{day}.html"
+    latest_path = "/runs/latest"
+
+    debug_link = ""
+    if run is not None:
+        rid = run.get("run_id", "")
+        if rid:
+            debug_link = f'<div><a href="/debug/run/{rid}">Debug run {rid}</a></div>'
+
+    html_text = f"""
+    <!doctype html>
+    <html>
+      <head><meta charset="utf-8"><title>UI {day}</title></head>
+      <body style="font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px;">
+        <h2>UI for {day}</h2>
+        <div><a href="{digest_path}">Open digest artifact</a></div>
+        <div><a href="{latest_path}">View latest run (JSON)</a></div>
+        {debug_link}
+      </body>
+    </html>
+    """
+    return HTMLResponse(content=html_text, status_code=200)
+
+
+@app.get("/debug/run/{run_id}")
+def debug_run(run_id: str):
+    conn = get_conn()
+    try:
+        init_db(conn)
+        run = get_run_by_id(conn, run_id=run_id)
+    finally:
+        conn.close()
+
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    
+    started_at = run.get("started_at", "") or ""
+    day = started_at[:10] if len(started_at)>= 10 else ""
+    artifact_path = f"/artifacts/digest_{day}.html" if day else None
+
+    out = dict(run)
+    out["artifact_path"] = artifact_path
+    return out
+
+
 
 @app.get("/debug/http_error")
 def debug_http_error():

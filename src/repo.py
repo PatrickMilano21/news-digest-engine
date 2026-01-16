@@ -209,3 +209,33 @@ def has_successful_run_for_day(conn, *, day: str) -> bool:
     ).fetchone()
 
     return row is not None
+
+
+def get_run_by_id(conn, *, run_id: str) -> dict | None:
+    row = conn.execute(
+        """
+        SELECT run_id, started_at, finished_at, status,
+            received, after_dedupe, inserted, duplicates,
+            error_type, error_message
+        FROM runs
+        WHERE run_id = ?
+        LIMIT 1;
+        """,
+        (run_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+    
+    return {
+        "run_id": row[0],
+        "started_at": row[1],
+        "finished_at": row[2],
+        "status": row[3],
+        "received": row[4],
+        "after_dedupe": row[5],
+        "inserted": row[6],
+        "duplicates": row[7],
+        "error_type": row[8],
+        "error_message": row[9],
+    }

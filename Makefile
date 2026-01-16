@@ -9,8 +9,8 @@ test:
 	$(PY) -m pytest -q
 
 run:
-	@if "$(DATE)"=="" (echo ERROR: missing DATE. Usage: make run DATE=YYYY-MM-DD & echo Example: make run DATE=2026-01-09 & exit /b 1)
-	$(PY) -m src.run --date $(DATE)
+	python -m jobs.daily_run --date $(DATE) --mode fixtures
+	python -m jobs.build_digest --date $(DATE)
 
 eval:
 	@if "$(DATE)"=="" (echo ERROR: missing DATE. Usage: make eval DATE=YYYY-MM-DD & exit /b 1)

@@ -38,12 +38,85 @@ Ingest → normalize/dedupe → rank → artifacts → run history → evals →
 - Start work by reading `CLAUDE.md` and then checking `docs/raw/Locked_Syllabus.docx` for the next incomplete day.
 - When coding, follow: **English spec → YOUR MOVE → reference**
   - **English spec:** what/why/acceptance + files touched
-  - **YOUR MOVE:** you implement + run `make test` + paste first failing output
+  - **YOUR MOVE (Patrick):** I implement + run `make test` + paste first failing output
   - **Reference:** provide minimal diffs only after the attempt; no refactors unless requested
 - Mini-steps only: one small testable change; ask exactly one mechanical check-in question per step.
 - Keep tests green. If red: fix the smallest failing thing only.
 - End each step with: what changed, commands to run, and what "green" looks like.
 - When a module name changes, update the Architecture section in the same commit.
+
+## Code suggestions vs file edits (IMPORTANT)
+
+Default behavior:
+- You MAY provide code snippets in the chat (reference snippets / minimal diffs).
+- You MUST NOT write or modify code files in the repo unless explicitly unlocked.
+
+File edit unlock phrases:
+- **FILE_EDIT_MODE: ON** (you may edit code files)
+- **FILE_EDIT_MODE: OFF** (return to chat-only suggestions)
+- **EDIT_ONLY: <path>** (permission to edit exactly one file)
+
+Even when giving code snippets:
+- Follow English spec → YOUR MOVE → reference
+- Do not dump full solutions upfront
+- Provide only the mini-step snippet, not multi-step combined code
+
+Current mode (default): **FILE_EDIT_MODE: OFF**
+Unless I explicitly switch modes, you may only provide chat snippets and must not edit repo files.
+
+## End-of-day workflow (git + status)
+
+At the end of a day:
+1) Update `STATUS.md` with:
+   - Day number + date
+   - Shipped features (bullets)
+   - Tests added/updated (count)
+   - Remaining blockers
+   - Next day target
+2) Prepare a commit plan:
+   - Show `git status` summary
+   - Propose the exact `git add` paths (never `git add -A`)
+   - Propose a commit message: `dayXX: <tight summary>`
+3) DO NOT run `git commit` automatically.
+   - I (Patrick) will run the final commands.
+4) Never stage/commit:
+   - `.claude/`, `.env`, `data/`, secrets, large artifacts
+5) **Claude must never run git commands.** All git is executed manually in a separate terminal.
+
+## Trigger: END_OF_DAY DayXX
+
+When I say: **END_OF_DAY DayXX**
+
+Do not modify code files. Only update `STATUS.md` and output git commands.
+
+Claude must:
+1) Create/update `STATUS.md` (repo root) with:
+   - Current Day (DayXX + date)
+   - Today Shipped
+   - Tests (command + pass/fail)
+   - Current Blockers
+   - Next (top 3)
+   - Commands (known-good)
+2) Print sanity checks (yes/no):
+   - STATUS.md updated today
+   - Exactly one commit planned (unless hotfix)
+   - Commit message starts with `dayXX:`
+   - Tests green right now (if unknown, say NO and show command)
+3) Output git plan as commands only (do not execute):
+   - `git status`
+   - `git diff`
+   - `git add <explicit paths>` (never `git add -A`)
+   - `git commit -m "dayXX: <tight summary>"`
+
+Constraints:
+- Never stage/commit: `.claude/`, `.env*`, `data/`, secrets, large artifacts.
+- If tests are red/unknown, stop at git plan and tell me the smallest next step to get green.
+
+## Trigger: DOCS_ONLY
+
+When I say: **DOCS_ONLY**
+- You may edit only: `CLAUDE.md`, `STATUS.md`, and markdown files under `docs/` or `writeups/`.
+- Do not modify any code files.
 
 ## Common Commands
 

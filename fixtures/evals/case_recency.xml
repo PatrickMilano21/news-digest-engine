@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Fixture Feed</title>
+
+    <item>
+      <title>Older item</title>
+      <link>https://example.com/old</link>
+      <pubDate>Wed, 14 Jan 2026 09:00:00 GMT</pubDate>
+      <description></description>
+    </item>
+
+    <item>
+      <title>Newer item</title>
+      <link>https://example.com/new</link>
+      <pubDate>Wed, 14 Jan 2026 11:00:00 GMT</pubDate>
+      <description></description>
+    </item>
+
+  </channel>
+</rss>

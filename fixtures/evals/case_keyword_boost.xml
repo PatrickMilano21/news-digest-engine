@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Fixture Feed</title>
+
+    <item>
+      <title>Company B quarterly results</title>
+      <link>https://example.com/b</link>
+      <pubDate>Wed, 14 Jan 2026 10:00:00 GMT</pubDate>
+      <description>earnings</description>
+    </item>
+
+    <item>
+      <title>Company A announces merger talks</title>
+      <link>https://example.com/a</link>
+      <pubDate>Wed, 14 Jan 2026 10:00:00 GMT</pubDate>
+      <description>deal</description>
+    </item>
+
+  </channel>
+</rss>

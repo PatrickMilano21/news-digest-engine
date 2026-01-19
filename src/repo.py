@@ -42,13 +42,13 @@ def insert_news_items(conn: sqlite3.Connection,items: list[NewsItem]) -> dict:
     return {"inserted": inserted, "duplicates": duplicates}
 
 
-def start_run(conn: sqlite3.Connection, run_id: str, started_at: datetime, received: int) -> None:
+def start_run(conn: sqlite3.Connection, run_id: str, started_at: datetime, received: int, *, run_type: str = "ingest") -> None:
     conn.execute(
         """
-        INSERT INTO runs (run_id, started_at, status, received)
-        VALUES (?, ?, ?, ?);
+        INSERT INTO runs (run_id, started_at, status, received, run_type)
+        VALUES (?, ?, ?, ?, ?);
         """,
-        (run_id, started_at, "started", received),
+        (run_id, started_at, "started", received, run_type),
     )
     conn.commit()
 
@@ -164,16 +164,17 @@ def get_news_items_by_date(conn: sqlite3.Connection, *, day: str) -> list[NewsIt
 
 def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
     """
-    Read-only. Return the most recent run row for a given YYYY-MM-DD day
-    based on started_at's first 10 chars (ISO date).
+    Read-only. Return the most recent ingest run for a given YYYY-MM-DD day.
+    Filters to run_type='ingest' only.
     """
     row = conn.execute(
         """
         SELECT run_id, started_at, finished_at, status,
                received, after_dedupe, inserted, duplicates,
-               error_type, error_message
+               error_type, error_message, run_type
         FROM runs
         WHERE substr(started_at, 1, 10) = ?
+          AND run_type = 'ingest'
         ORDER BY started_at DESC
         LIMIT 1;
         """,
@@ -182,7 +183,7 @@ def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
 
     if row is None:
         return None
-    
+
     return {
         "run_id": row[0],
         "started_at": row[1],
@@ -193,8 +194,82 @@ def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
         "inserted": row[6],
         "duplicates": row[7],
         "error_type": row[8],
-        "error_message": row[9],       
+        "error_message": row[9],
+        "run_type": row[10],
     }
+
+
+def get_eval_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
+    """
+    Read-only. Return the most recent eval run for a given YYYY-MM-DD day.
+    Filters to run_type='eval' only.
+    """
+    row = conn.execute(
+        """
+        SELECT run_id, started_at, finished_at, status,
+               received, after_dedupe, inserted, duplicates,
+               error_type, error_message, run_type
+        FROM runs
+        WHERE substr(started_at, 1, 10) = ?
+          AND run_type = 'eval'
+        ORDER BY started_at DESC
+        LIMIT 1;
+        """,
+        (day,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "run_id": row[0],
+        "started_at": row[1],
+        "finished_at": row[2],
+        "status": row[3],
+        "received": row[4],
+        "after_dedupe": row[5],
+        "inserted": row[6],
+        "duplicates": row[7],
+        "error_type": row[8],
+        "error_message": row[9],
+        "run_type": row[10],
+    }
+
+
+def list_runs_by_day(conn: sqlite3.Connection, *, day: str) -> list[dict]:
+    """
+    Read-only. Return all runs for a given YYYY-MM-DD day (any run_type).
+    For debug tooling.
+    """
+    rows = conn.execute(
+        """
+        SELECT run_id, started_at, finished_at, status,
+               received, after_dedupe, inserted, duplicates,
+               error_type, error_message, run_type
+        FROM runs
+        WHERE substr(started_at, 1, 10) = ?
+        ORDER BY started_at DESC;
+        """,
+        (day,),
+    ).fetchall()
+
+    out = []
+    for row in rows:
+        out.append({
+            "run_id": row[0],
+            "started_at": row[1],
+            "finished_at": row[2],
+            "status": row[3],
+            "received": row[4],
+            "after_dedupe": row[5],
+            "inserted": row[6],
+            "duplicates": row[7],
+            "error_type": row[8],
+            "error_message": row[9],
+            "run_type": row[10],
+        })
+    return out
+
 
 def has_successful_run_for_day(conn, *, day: str) -> bool:
     row = conn.execute(
@@ -216,7 +291,7 @@ def get_run_by_id(conn, *, run_id: str) -> dict | None:
         """
         SELECT run_id, started_at, finished_at, status,
             received, after_dedupe, inserted, duplicates,
-            error_type, error_message
+            error_type, error_message, run_type
         FROM runs
         WHERE run_id = ?
         LIMIT 1;
@@ -226,7 +301,7 @@ def get_run_by_id(conn, *, run_id: str) -> dict | None:
 
     if row is None:
         return None
-    
+
     return {
         "run_id": row[0],
         "started_at": row[1],
@@ -238,4 +313,68 @@ def get_run_by_id(conn, *, run_id: str) -> dict | None:
         "duplicates": row[7],
         "error_type": row[8],
         "error_message": row[9],
+        "run_type": row[10],
     }
+
+
+def upsert_run_failures(conn: sqlite3.Connection, *, run_id: str, breakdown: dict[str, int]) -> None:
+    conn.execute("DELETE FROM run_failures WHERE run_id = ?;", (run_id,))
+
+    created_at = datetime.now(timezone.utc).isoformat()
+    for error_code, count in breakdown.items():
+        conn.execute(
+            """
+            INSERT INTO run_failures (run_id, error_code, count, created_at)
+            VALUES (?, ?, ?, ?);
+            """,(run_id, error_code, count, created_at)
+        )
+
+    conn.commit()
+
+def get_run_failures_breakdown(conn, *, run_id: str) -> dict[str, int]:
+    rows = conn.execute(
+        """
+        SELECT error_code, count
+        FROM run_failures
+        WHERE run_id = ?;
+        """,
+        (run_id,),
+    ).fetchall()
+
+    breakdown = {}
+    for error_code, count in rows:
+        breakdown[error_code] = count
+    return breakdown
+
+
+def insert_run_artifact(conn: sqlite3.Connection, *, run_id: str, kind: str, path: str) -> None:
+    """
+    Record an artifact produced by a run.
+    Uses INSERT OR REPLACE so re-runs overwrite cleanly.
+    """
+    created_at = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        INSERT OR REPLACE INTO run_artifacts (run_id, kind, path, created_at)
+        VALUES (?, ?, ?, ?);
+        """,
+        (run_id, kind, path, created_at),
+    )
+    conn.commit()
+
+def get_run_artifacts(conn: sqlite3.Connection, *, run_id: str) -> dict[str, str]:
+    """
+    Retrieve artifacts for a run.
+    Returns dict mapping kind to path, e.g., {"eval_report":"artifacts/eval_report_2026-01-18.md"}
+    """
+    rows = conn.execute(
+        """
+        SELECT kind, path
+        FROM run_artifacts
+        WHERE run_id = ?;
+        """,
+        (run_id,),
+    ).fetchall()
+
+    return{kind: path for kind, path in rows}
+    

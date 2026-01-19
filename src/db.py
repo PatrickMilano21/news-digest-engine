@@ -53,9 +53,41 @@ def init_db(conn: sqlite3.Connection) -> None:
             inserted INTEGER NOT NULL DEFAULT 0,
             duplicates INTEGER NOT NULL DEFAULT 0,
             error_type TEXT,
-            error_message TEXT
+            error_message TEXT,
+            run_type TEXT NOT NULL DEFAULT 'ingest'
+        );
+        """
+    )
+
+    conn.execute(
+         """
+        CREATE TABLE IF NOT EXISTS run_failures (     
+              id INTEGER PRIMARY KEY,
+              run_id TEXT NOT NULL,
+              error_code TEXT NOT NULL,
+              count INTEGER NOT NULL DEFAULT 0,
+              created_at TEXT NOT NULL
+        );
+        """
+    )
+
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS run_artifacts (
+            id INTEGER PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            kind TEXT NOT NULL,
+            path TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            UNIQUE(run_id, kind)
         );
         """
     )
 
     conn.commit()
+
+    # Idempotent migration: add run_type column if missing (for existing DBs)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(runs);").fetchall()]
+    if "run_type" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN run_type TEXT NOT NULL DEFAULT 'ingest';")
+        conn.commit()

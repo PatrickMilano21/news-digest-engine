@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, upsert_run_failures, get_run_failures_breakdown, insert_run_artifact, get_run_artifacts, get_run_by_day, get_eval_run_by_day
 from src.schemas import NewsItem
 
 
@@ -132,5 +132,104 @@ def test_get_latest_run_returns_most_recent_by_started_at(tmp_path, monkeypatch)
         assert latest is not None
         assert latest["run_id"] == run_id_new
         assert latest["received"] == 2
+    finally:
+        conn.close()
+
+def test_run_failures_roundtrip(tmp_path, monkeypatch):
+    db_file = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+        run_id = "test_run_123"
+        breakdown = {"EVAL_MISMATCH_KEYWORD": 2, "EVAL_MISMATCH_RECENCY": 1}
+        upsert_run_failures(conn, run_id=run_id, breakdown=breakdown)
+        result = get_run_failures_breakdown(conn, run_id=run_id)
+
+        assert result == breakdown
+    finally:
+        conn.close()
+
+
+def test_run_artifacts_roundtrip(tmp_path, monkeypatch):
+    db_file = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        run_id = "artifact_test_123"
+        insert_run_artifact(conn, run_id=run_id, kind="eval_report", path="artifacts/eval_report_2026-01-18.md")
+        insert_run_artifact(conn, run_id=run_id, kind="digest", path="artifacts/digest_2026-01-18.html")
+
+        result = get_run_artifacts(conn, run_id=run_id)
+
+        assert result == {
+            "eval_report": "artifacts/eval_report_2026-01-18.md",
+            "digest": "artifacts/digest_2026-01-18.html",
+        }
+    finally:
+        conn.close()
+
+
+def test_start_run_stores_run_type(tmp_path, monkeypatch):
+    db_file = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        start_run(conn, "run_ingest", "2026-01-15T00:00:00+00:00", received=10)
+        start_run(conn, "run_eval", "2026-01-15T01:00:00+00:00", received=0, run_type="eval")
+
+        row1 = conn.execute("SELECT run_type FROM runs WHERE run_id = ?", ("run_ingest",)).fetchone()
+        row2 = conn.execute("SELECT run_type FROM runs WHERE run_id = ?", ("run_eval",)).fetchone()
+
+        assert row1[0] == "ingest"
+        assert row2[0] == "eval"
+    finally:
+        conn.close()
+
+
+def test_get_run_by_day_returns_ingest_only(tmp_path, monkeypatch):
+    db_file = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        # Create both types for same day
+        start_run(conn, "ingest_run", "2026-01-15T00:00:00+00:00", received=10)
+        start_run(conn, "eval_run", "2026-01-15T01:00:00+00:00", received=0, run_type="eval")
+
+        result = get_run_by_day(conn, day="2026-01-15")
+
+        assert result is not None
+        assert result["run_id"] == "ingest_run"
+        assert result["run_type"] == "ingest"
+    finally:
+        conn.close()
+
+
+def test_get_eval_run_by_day_returns_eval_only(tmp_path, monkeypatch):
+    db_file = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        start_run(conn, "ingest_run", "2026-01-15T00:00:00+00:00", received=10)
+        start_run(conn, "eval_run", "2026-01-15T01:00:00+00:00", received=0, run_type="eval")
+
+        result = get_eval_run_by_day(conn, day="2026-01-15")
+
+        assert result is not None
+        assert result["run_id"] == "eval_run"
+        assert result["run_type"] == "eval"
     finally:
         conn.close()

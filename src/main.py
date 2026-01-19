@@ -11,7 +11,7 @@ from src.errors import problem
 
 from src.schemas import IngestRequest
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id, get_run_failures_breakdown, get_run_artifacts
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
@@ -215,11 +215,15 @@ def ui_for_date(date_str: str) -> HTMLResponse:
 
 
 @app.get("/debug/run/{run_id}")
-def debug_run(run_id: str):
+def debug_run(run_id: str, request: Request):
+    request_id = request.state.request_id
+
     conn = get_conn()
     try:
         init_db(conn)
         run = get_run_by_id(conn, run_id=run_id)
+        breakdown = get_run_failures_breakdown(conn, run_id=run_id)
+        artifact_paths = get_run_artifacts(conn, run_id=run_id)
     finally:
         conn.close()
 
@@ -228,12 +232,25 @@ def debug_run(run_id: str):
     
     started_at = run.get("started_at", "") or ""
     day = started_at[:10] if len(started_at)>= 10 else ""
-    artifact_path = f"/artifacts/digest_{day}.html" if day else None
+    #Build counts dict
+    counts = {
+        "received": run.get("received"),
+        "after_dedupe": run.get("after_dedupe"),
+        "inserted": run.get("inserted"),
+        "duplicates": run.get("duplicates"),
+    }
 
-    out = dict(run)
-    out["artifact_path"] = artifact_path
-    return out
-
+    return {
+        "run_id": run.get("run_id"),
+        "run_type": run.get("run_type"),
+        "status": run.get("status"),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "counts": counts,
+        "failures_by_code": breakdown,
+        "artifact_paths": artifact_paths,
+        "request_id": request_id,
+    }
 
 
 @app.get("/debug/http_error")

@@ -1,11 +1,13 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 import sqlite3
+import json
+
 
 from src.schemas import NewsItem
 from src.normalize import dedupe_key
-
+from src.redact import sanitize
 
 def insert_news_items(conn: sqlite3.Connection,items: list[NewsItem]) -> dict:
     inserted = 0
@@ -431,5 +433,85 @@ NewsItem]]:
         )
         out.append((row[0], item))
     return out
+
+
+def write_audit_log(conn, *, event_type: str, ts: datetime | str, run_id: str | None = None, day: str | None = None, details: dict | None = None) -> None:
+    """Write an audit log entry. never raises - failures are swallowed."""
+    try:
+        ts_str = ts.isoformat() if isinstance(ts, datetime) else ts
+        details_safe = sanitize(details  or {})
+        conn.execute(
+            """
+            INSERT INTO audit_logs (ts, event_type, run_id, day, details_json)
+            VALUES (?, ?, ?, ?, ?)
+            """,(ts_str, event_type, run_id, day, json.dumps(details_safe))
+        )
+        conn.commit()
+    except:
+        pass # swallow errors
+
+def get_audit_logs(conn, *, limit: int = 100) -> list[dict]:
+    """Fetch recent audit logs for debugging."""
+    rows = conn.execute(
+        "SELECT id, ts, event_type, run_id, day, details_json FROM audit_logs ORDER BY id DESC LIMIT ?",   
+        (limit,)
+    ).fetchall()
+    return [
+        {
+            "id": r[0],
+            "ts": r[1],
+            "event_type": r[2],
+            "run_id": r[3],
+            "day": r[4],
+            "details": json.loads(r[5]) if r[5] else {}
+        }
+        for r in rows
+    ]
+
+
+def report_top_sources(conn, *, end_day: str, days: int = 7, limit: int = 10) -> list[dict]:
+    """Get top sources by item count over the last N days."""
+    end_date = datetime.strptime(end_day, "%Y-%m-%d").date()
+    start_date = end_date - timedelta(days=days - 1)
+    start_day = start_date.isoformat()
+    
+
+    rows = conn.execute(
+        """
+        SELECT source, COUNT(*) as count
+        FROM news_items
+        WHERE DATE(published_at) BETWEEN ? AND ?
+        GROUP BY source
+        ORDER BY count DESC
+        LIMIT ?
+        """,(start_day, end_day, limit)
+    ).fetchall()
+
+    return [{"source": row[0], "count": row[1]} for row in rows]
+
+
+def report_failures_by_code(conn, *, end_day: str, days: int = 7) -> dict[str, int]:
+    """Get run failure counts by error_type over the last N days."""
+    end_date = datetime.strptime(end_day, "%Y-%m-%d").date()
+    start_date = end_date - timedelta(days=days - 1)
+    start_day = start_date.isoformat()
+
+    rows = conn.execute(
+        """
+        SELECT error_type, COUNT(*)
+        FROM runs
+        WHERE status = 'error'
+        AND DATE(started_at) BETWEEN ? AND ?
+        AND error_type IS NOT NULL
+        GROUP BY error_type
+        """,
+        (start_day, end_day)
+    ).fetchall()
+
+    return {row[0]: row[1] for row in rows}
+
+
+
+
 
 

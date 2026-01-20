@@ -17,10 +17,12 @@ from src.repo import (
     get_run_by_day,
     insert_news_items,
     upsert_run_failures,
+    write_audit_log
 )
 from src.rss_fetch import fetch_rss_with_retry
 from src.rss_parse import parse_rss
 from src.normalize import normalize_and_dedupe
+from src.weekly_report import write_weekly_report
 
 
 def main() -> int:
@@ -56,6 +58,7 @@ def main() -> int:
         now_t = datetime.now(timezone.utc).time()
         started_at = datetime.combine(run_day, now_t, tzinfo=timezone.utc).isoformat()
         start_run(conn, run_id=run_id, started_at=started_at, received=0)
+        write_audit_log(conn, event_type="RUN_STARTED", ts=started_at, run_id=run_id, day=day, details={})
 
         # Loop feeds
         all_items = []
@@ -129,6 +132,13 @@ def main() -> int:
             inserted=inserted,
             duplicates=duplicates,
         )
+        write_audit_log(conn, event_type="RUN_FINISHED_OK", ts=finished_at, run_id=run_id, day=day, details={"inserted": inserted, "duplicates": duplicates})
+
+        # Generate weekly report (best-effort)
+        try:
+            write_weekly_report(conn=conn, end_day=day)
+        except Exception as e:
+            log_event("weekly_report_failed", error=str(e))
 
         elapsed_ms = int((time.perf_counter() - t0) * 1000)
         log_event(
@@ -152,14 +162,16 @@ def main() -> int:
     except Exception as exc:
         # Unexpected error — mark run as failed
         finished_at = datetime.now(timezone.utc).isoformat()
+        error_type = type(exc).__name__
         try:
             finish_run_error(
                 conn,
                 run_id=run_id,
                 finished_at=finished_at,
-                error_type=type(exc).__name__,
+                error_type=error_type,
                 error_message=str(exc),
             )
+            write_audit_log(conn, event_type="RUN_FINISHED_ERROR", ts=finished_at, run_id=run_id, day=day, details={"error_type": error_type, "error_message": str(exc)})
         except:
             pass
         elapsed_ms = int((time.perf_counter() - t0) * 1000)

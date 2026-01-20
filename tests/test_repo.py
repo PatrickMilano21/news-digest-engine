@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timezone
 
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, upsert_run_failures, get_run_failures_breakdown, insert_run_artifact, get_run_artifacts, get_run_by_day, get_eval_run_by_day
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, upsert_run_failures, get_run_failures_breakdown, insert_run_artifact, get_run_artifacts, get_run_by_day, get_eval_run_by_day, report_top_sources, report_failures_by_code
 from src.schemas import NewsItem
 
 
@@ -233,3 +233,30 @@ def test_get_eval_run_by_day_returns_eval_only(tmp_path, monkeypatch):
         assert result["run_type"] == "eval"
     finally:
         conn.close()
+
+
+def test_report_top_sources(tmp_path, monkeypatch):
+    # Setup: create DB with test items
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
+    conn = get_conn()
+    init_db(conn)
+    
+    # Insert test items with different sources
+    # ... (use your existing insert_news_items or direct INSERT)
+    
+    result = report_top_sources(conn, end_day="2026-01-20", days=7)
+    
+    assert isinstance(result, list)
+    # Add more assertions based on your fixture data
+
+
+def test_report_failures_by_code_empty(tmp_path, monkeypatch):
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
+    conn = get_conn()
+    init_db(conn)
+    
+    result = report_failures_by_code(conn, end_day="2026-01-20", days=7)
+    
+    assert result == {}

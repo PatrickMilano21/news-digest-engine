@@ -84,6 +84,18 @@ def init_db(conn: sqlite3.Connection) -> None:
         """
     )
 
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS audit_logs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            run_id TEXT,
+            day TEXT,
+            details_json TEXT
+        )
+        """
+    )
     conn.commit()
 
     # Idempotent migration: add run_type column if missing (for existing DBs)

@@ -33,6 +33,44 @@ def seed_ok_run_for_day(day: str) -> str:
 
     return run_id
 
+def seed_items_for_day(day: str) -> list[int]:
+    """Seed test items and return their database IDs."""
+    from src.schemas import NewsItem
+    from src.repo import insert_news_items
+    from datetime import datetime, timezone
+
+    items = [
+        NewsItem(
+            source="test-source",
+            url=f"https://example.com/{day}/article-1",
+
+published_at=datetime.fromisoformat(f"{day}T12:00:00+00:00"),
+            title="Test Article One",
+            evidence="Some evidence text",
+        ),
+        NewsItem(
+            source="test-source",
+            url=f"https://example.com/{day}/article-2",
+    
+published_at=datetime.fromisoformat(f"{day}T11:00:00+00:00"),
+            title="Test Article Two",
+            evidence="More evidence",
+        ),
+    ]
+    
+    conn = get_conn()
+    try:
+        init_db(conn)
+        insert_news_items(conn, items)
+        # Get the IDs that were just inserted
+        rows = conn.execute(
+            "SELECT id FROM news_items WHERE substr(published_at, 1, 10)   = ? ORDER BY id",
+            (day,)
+        ).fetchall()
+        return [row[0] for row in rows]
+    finally:
+        conn.close()
+
 
 def test_ui_date_invalid_date_returns_400(client: TestClient):
     resp = client.get("/ui/date/not-a-date")
@@ -41,13 +79,19 @@ def test_ui_date_invalid_date_returns_400(client: TestClient):
 
 def test_ui_date_valid_links_present(client: TestClient):
     day = "2026-01-14"
-    run_id = seed_ok_run_for_day(day)
+    seed_ok_run_for_day(day)
+    item_ids = seed_items_for_day(day)
+
     resp = client.get(f"/ui/date/{day}")
     assert resp.status_code == 200
+
     html = resp.text
-    assert f"/artifacts/digest_{day}.html" in html
-    assert f"/runs/latest" in html
-    assert f"debug/run/{run_id}" in html
+    assert f"Items for {day}" in html
+    assert "Test Article One" in html
+    assert "Test Article Two" in html
+    # Check that item links are present
+    for item_id in item_ids:
+        assert f"/ui/item/{item_id}" in html
 
 
 def test_debug_run_not_found_404(client: TestClient):

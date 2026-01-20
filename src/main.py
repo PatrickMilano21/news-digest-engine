@@ -1,9 +1,12 @@
 import uuid
+import html as html_lib
+
 from datetime import datetime, timezone, date
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
 
 from src.middleware import request_id_middleware
 from src.logging_utils import log_event
@@ -11,19 +14,33 @@ from src.errors import problem
 
 from src.schemas import IngestRequest
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id, get_run_failures_breakdown, get_run_artifacts
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id, get_run_failures_breakdown, get_run_artifacts, get_news_item_by_id, get_news_items_by_date_with_ids
 from src.normalize import normalize_and_dedupe
-from src.scoring import RankConfig, rank_items
+from src.scoring import RankConfig, rank_items, score_item
 from src.artifacts import render_digest_html
 from src.explain import explain_item
 
 
 app = FastAPI()
 
+templates = Jinja2Templates(directory="templates")
+
 app.mount("/artifacts", StaticFiles(directory="artifacts"), name = "artifacts")
 
 #Register middleware
 app.middleware("http")(request_id_middleware)
+
+def render_ui_error(request: Request, status: int, message: str) -> HTMLResponse:
+    """Return HTML error for UI routes (not JSON)."""
+    safe_msg = html_lib.escape(message)
+    content = f"""<!DOCTYPE html>
+<html><head><title>Error {status}</title></head>
+<body style="font-family: sans-serif; margin: 24px;">
+<h1>Error {status}</h1>
+<p>{safe_msg}</p>
+<p><a href="/">← Home</a></p>
+</body></html>"""
+    return HTMLResponse(content=content, status_code=status)
 
 @app.get("/")
 def root():
@@ -177,42 +194,81 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
         conn.close()
 
 @app.get("/ui/date/{date_str}", response_class=HTMLResponse)
-def ui_for_date(date_str: str) -> HTMLResponse:
+def ui_date(request: Request, date_str: str, top_n: int = 10):
+    # Validate date
     try:
         day = date.fromisoformat(date_str).isoformat()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+        return render_ui_error(request, 400, "Invalid date format. Expected YYYY-MM-DD.")
+
+    if top_n < 1:
+        return render_ui_error(request, 400, "top_n must be >= 1")
+    
+    now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
+    cfg = RankConfig()
 
     conn = get_conn()
     try:
         init_db(conn)
+        items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
         run = get_run_by_day(conn, day=day)
     finally:
         conn.close()
+    
+    if not items_with_ids:
+        return render_ui_error(request, 404, f"No items found for {day}.")
 
-    digest_path = f"/artifacts/digest_{day}.html"
-    latest_path = "/runs/latest"
+    #Rank pairs directly using score_item() avoids fragile object identify mapping
+    scored_pairs = []
+    for idx, (db_id, item) in enumerate(items_with_ids):
+        score = score_item(item, now=now, cfg=cfg)
+        scored_pairs.append((score, item.published_at, idx, db_id, item))
 
-    debug_link = ""
-    if run is not None:
-        rid = run.get("run_id", "")
-        if rid:
-            debug_link = f'<div><a href="/debug/run/{rid}">Debug run {rid}</a></div>'
+    #sort name by same key as rank_items(): score desc, published_at desc, index asc
+    scored_pairs.sort(key=lambda t: (-t[0], -t[1].timestamp(), t[2]))
 
-    html_text = f"""
-    <!doctype html>
-    <html>
-      <head><meta charset="utf-8"><title>UI {day}</title></head>
-      <body style="font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px;">
-        <h2>UI for {day}</h2>
-        <div><a href="{digest_path}">Open digest artifact</a></div>
-        <div><a href="{latest_path}">View latest run (JSON)</a></div>
-        {debug_link}
-      </body>
-    </html>
-    """
-    return HTMLResponse(content=html_text, status_code=200)
+    # Build display list with IDs and explanations
+    display_items = []
+    for score, _, _, db_id, item in scored_pairs[:top_n]:
+        expl = explain_item(item, now=now, cfg=cfg)
+        display_items.append({
+            "id": db_id,
+            "item": item,
+            "score": score,
+            "expl": expl,
+        })
 
+    return templates.TemplateResponse(
+        request,
+        "date.html",
+        {"day": day, "items": display_items, "count": len(display_items), "run": run}
+    )
+
+@app.get("/ui/item/{item_id}", response_class=HTMLResponse)
+def ui_item(request: Request, item_id: int):
+    if item_id < 1:
+        return render_ui_error(request, 400, "item_id must be >= 1")
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+        result = get_news_item_by_id(conn, item_id=item_id)
+    finally:
+        conn.close()
+
+    if result is None:
+        return render_ui_error(request, 404, f"Item {item_id} not found.")
+
+    item, day = result
+    now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
+    cfg = RankConfig()
+    expl = explain_item(item, now=now, cfg=cfg)
+
+    return templates.TemplateResponse(
+        request,
+        "item.html",
+        {"item_id": item_id, "item": item, "expl": expl, "day": day}
+    )
 
 @app.get("/debug/run/{run_id}")
 def debug_run(run_id: str, request: Request):

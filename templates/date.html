@@ -1,0 +1,29 @@
+{% extends "_base.html" %}
+
+{% block title %}Items for {{ day }}{% endblock %}
+
+{% block content %}
+<h1>Items for {{ day }}</h1>
+<p>{{ count }} items</p>
+
+{% for d in items %}
+<div class="item">
+    <div><a href="/ui/item/{{ d.id }}">{{ d.item.title }}</a></div>
+    <div class="meta">
+        {{ d.item.source }} • {{ d.item.published_at.isoformat()[:16] }} • score: {{
+"%.3f"|format(d.score) }}
+    </div>
+    <div class="why">
+        {% if d.expl.matched_topics %}Topics: {{ d.expl.matched_topics | join(", ") }}{% endif %}      
+        {% if d.expl.matched_keywords %}Keywords: {{ d.expl.matched_keywords | map(attribute='keyword')   | join(", ") }}{% endif %}
+        Recency: {{ "%.2f"|format(d.expl.recency_decay) }}
+    </div>
+</div>
+{% endfor %}
+
+{% if not items %}
+<p><em>No items found.</em></p>
+{% endif %}
+
+<p><a href="/ui/date/{{ day }}">Refresh</a> | <a href="/">Home</a></p>
+{% endblock %}

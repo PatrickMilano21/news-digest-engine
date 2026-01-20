@@ -379,3 +379,57 @@ def get_run_artifacts(conn: sqlite3.Connection, *, run_id: str) -> dict[str, str
 
     return{kind: path for kind, path in rows}
     
+
+def get_news_item_by_id(conn: sqlite3.Connection, *, item_id: int) -> tuple[NewsItem, str] | None:     
+    """Fetch a single news item by database ID. Returns (NewsItem, day) or None."""
+    row = conn.execute(
+        """
+        SELECT source, url, published_at, title, evidence
+        FROM news_items
+        WHERE id = ?
+        LIMIT 1;
+        """,
+        (item_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    published_at = datetime.fromisoformat(row[2])
+    day = published_at.date().isoformat()
+
+    return NewsItem(
+        source=row[0],
+        url=row[1],
+        published_at=published_at,
+        title=row[3],
+        evidence=row[4],
+    ), day
+
+
+def get_news_items_by_date_with_ids(conn: sqlite3.Connection, *, day: str) -> list[tuple[int, 
+NewsItem]]:
+    """Fetch items for a day with their database IDs for UI linking."""
+    rows = conn.execute(
+        """
+        SELECT id, source, url, published_at, title, evidence
+        FROM news_items
+        WHERE substr(published_at, 1, 10) = ?
+        ORDER BY published_at DESC, id DESC;
+        """,
+        (day,),
+    ).fetchall()
+
+    out: list[tuple[int, NewsItem]] = []
+    for row in rows:
+        item = NewsItem(
+            source=row[1],
+            url=row[2],
+            published_at=datetime.fromisoformat(row[3]),
+            title=row[4],
+            evidence=row[5],
+        )
+        out.append((row[0], item))
+    return out
+
+

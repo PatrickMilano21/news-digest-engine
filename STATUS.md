@@ -1,58 +1,56 @@
 # Project Status — News Digest Engine
 
 ## Current Day
-Day 11 (Week 2) — 2026-01-19
+**Day 12** (Week 2) — 2026-01-20
 
 ## Today Shipped
-- Created `src/error_codes.py` with failure taxonomy
-  - `FETCH_TIMEOUT`, `FETCH_TRANSIENT`, `RATE_LIMITED`, `FETCH_PERMANENT`, `PARSE_ERROR`
-- Refactored `src/rss_fetch.py` for structured results
-  - Added `FetchResult` dataclass (ok, content, error_code, error_message)
-  - `fetch_rss_with_retry()` now returns `FetchResult` instead of raising
-  - 429 returns immediately (no retry), 5xx/timeout retry with backoff
-- Rewrote `jobs/daily_run.py` with graceful ingestion loop
-  - Loops over feeds, handles failures, continues on errors
-  - Failures logged, classified, counted, stored in `run_failures`
-  - One feed failing never aborts the whole run
-- Created `src/feeds.py` with hardcoded feed URLs
-- Consolidated normalization logic in `src/normalize.py`
-  - Moved `normalize_url()`, `normalize_title()`, `dedupe_key()` from schemas.py
-  - `normalize_url()` now strips tracking params (utm_*, fbclid, gclid, etc.)
-  - Lowercases scheme + hostname
-  - Sorts query params for consistent deduplication
-- Cleaned up `src/schemas.py` to contain only data models (NewsItem, IngestRequest)
-- Added operator-grade `run_end` logging
-  - Unified event schema for both ingest and eval runs
-  - Fields: `run_id`, `run_type`, `status`, `elapsed_ms`, `failures_by_code`, `counts`
-  - Ingest counts: `received`, `after_dedupe`, `inserted`, `duplicates`
-  - Eval counts: `total`, `passed`, `failed` + `artifact_paths`
-  - One log line per run for grep-friendly monitoring
+
+### Server-Rendered UI
+- `GET /ui/date/{date}` — ranked items with links to item pages
+- `GET /ui/item/{id}` — item detail with explanation and back-link
+- `render_ui_error()` — HTML error responses for UI routes
+- Templates: `_base.html`, `date.html`, `item.html`
+
+### Repo Layer
+- `get_news_items_by_date_with_ids()` — items with DB IDs for linking
+- `get_news_item_by_id()` — single item lookup
+
+### MCP v0 (verifier_mcp_v0)
+- `mcp-servers/verifier/server.py` — 3-tool verification server
+- Tools: `run_tests`, `get_run`, `ui_smoke`
+- Registered via `.mcp.json`
+- Constraint: Verifier MCP tools must not mutate system state
 
 ## Tests
-- Updated: 3 tests in `test_rss_fetch.py` for `FetchResult` behavior
-  - `test_fetch_rss_with_retry_429_returns_rate_limited`
-  - `test_fetch_rss_with_retry_exhausted_returns_transient`
-  - `test_fetch_rss_with_retry_backoff`
-- Added: 4 tests in `test_normalize.py` for URL canonicalization
-  - `test_normalize_url_strips_tracking_params`
-  - `test_normalize_url_sorts_params`
-  - `test_normalize_url_lowercases_scheme_and_host`
-  - `test_dedupe_key_same_for_tracking_variants`
-- Current: all passing (`make test`)
+- Command: `make test`
+- Result: 86 passed
+- New tests: `tests/test_ui.py` (4 tests)
+
+## MCP Verification
+- `run_tests()`: ✓ 86 passed
+- `get_run(run_id)`: ✓ fetches operator data
+- `ui_smoke("2026-01-20")`: ✓ all 4 checks pass
 
 ## Current Blockers
 - None
 
-## Next (Day 12)
-1. Integration test for daily_run with mocked feeds
-2. Add more feeds to config
-3. End-to-end run validation with real feeds
+## Next (Day 13+)
+1. Use MCP tools during development workflow
+2. Week 3: MCP as intelligence boundary (LLM grounding)
+3. Add MCP rules section to CLAUDE.md
+
+## Key Learnings
+- MCP is not a feature. It's a constraint introduced when correctness, verification, or auditability matters more than creativity.
+- Week 2: MCP = verifier
+- Week 3: MCP = intelligence boundary
+- Future MCPs: `context_mcp`, `analysis_mcp`
 
 ## Commands (known-good)
 - Activate venv: `.\.venv\Scripts\Activate.ps1`
 - Tests: `make test`
 - Dev: `make dev`
-- Daily run: `python -m jobs.daily_run --date 2026-01-19`
-- Eval: `make eval DATE=2026-01-15`
+- Daily run: `python -m jobs.daily_run --date 2026-01-20`
+- Eval: `make eval DATE=2026-01-20`
 - Query runs: `curl http://localhost:8000/runs/latest`
 - Debug run: `curl http://localhost:8000/debug/run/{run_id}`
+- MCP list: `claude mcp list`

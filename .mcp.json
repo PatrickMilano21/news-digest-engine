@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "verifier": {
+      "type": "stdio",
+      "command": "python",
+      "args": [
+        "mcp-servers/verifier/server.py"
+      ],
+      "env": {}
+    }
+  }
+}

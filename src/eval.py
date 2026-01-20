@@ -1,4 +1,5 @@
 import argparse
+import time
 import uuid
 from datetime import date, datetime, timezone
 
@@ -18,6 +19,7 @@ def main() -> int:
     day = args.date
 
     run_id = uuid.uuid4().hex
+    t0 = time.perf_counter()
     log_event("eval_started", run_id=run_id, date=day)
 
     # Create timestamp for eval (end of the given day)
@@ -60,8 +62,21 @@ def main() -> int:
         print(f"[EVAL] date={day} run_id={run_id} pass_rate={pass_rate:.2%}({passed}/{total})")
         print(f"[EVAL] report written to {report_path}")
 
-        log_event("eval_finished", run_id=run_id, date=day,
-                total=total, passed=passed, failed=failed, pass_rate=pass_rate)        
+        elapsed_ms = int((time.perf_counter() - t0) * 1000)
+        log_event(
+            "run_end",
+            run_id=run_id,
+            run_type="eval",
+            status="ok",
+            elapsed_ms=elapsed_ms,
+            failures_by_code=breakdown,
+            counts={
+                "total": total,
+                "passed": passed,
+                "failed": failed,
+            },
+            artifact_paths={"eval_report": report_path},
+        )        
 
         return 0
     finally:

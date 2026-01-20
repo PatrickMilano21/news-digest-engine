@@ -3,7 +3,8 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import sqlite3
 
-from src.schemas import NewsItem, dedupe_key
+from src.schemas import NewsItem
+from src.normalize import dedupe_key
 
 
 def insert_news_items(conn: sqlite3.Connection,items: list[NewsItem]) -> dict:

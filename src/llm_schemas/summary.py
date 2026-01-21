@@ -24,16 +24,16 @@ class SummaryResult(BaseModel):
 
 @model_validator(mode='after')
 def check_summary_or_refusal(self):
-    """Either (summary + citations) OR refusal, never both, never neither"""
-    has_summary = self.summary is not none and len(self.summary) > 0
+    """Either (summary + citations) OR refusal, never both, never neither."""
+    has_summary = self.summary is not None and len(self.summary) > 0
     has_citations = len(self.citations) > 0
     has_refusal = self.refusal is not None and len(self.refusal) > 0
 
     if has_refusal and has_summary:
         raise ValueError("Cannot have both summary and refusal")
-    if has_refusal and not has_summary:
+    if not has_refusal and not has_summary:
         raise ValueError("Must have either summary or refusal")
-    if has_summary and has_citations:
+    if has_summary and not has_citations:
         raise ValueError("Summary requires at least one citation")
 
     return self

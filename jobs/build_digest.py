@@ -9,6 +9,8 @@ from src.repo import get_news_items_by_date, get_run_by_day, insert_run_artifact
 from src.scoring import RankConfig, rank_items
 from src.explain import explain_item
 from src.artifacts import render_digest_html
+from src.clients.llm_openai import summarize
+from src.grounding import validate_grounding
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -32,7 +34,14 @@ def main(argv: list[str] | None = None) -> int:
         cfg = RankConfig()
         ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
         explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
-        html_text = render_digest_html(day=day, run=run, ranked_items=ranked, explanations=explanations, cfg=cfg, now=now, top_n=top_n)
+        # Summarize each item and validate grounding
+        summaries = []
+        for item in ranked:
+            raw_result = summarize(item, item.evidence)
+            validated = validate_grounding(raw_result, item.evidence)
+            summaries.append(validated)
+        html_text = render_digest_html(day=day, run=run, ranked_items=ranked, explanations=explanations, summaries=summaries, cfg=cfg, now=now, top_n=top_n)    
+    
     finally:
         conn.close()
 

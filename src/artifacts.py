@@ -5,6 +5,7 @@ from datetime import datetime
 
 from src.schemas import NewsItem
 from src.scoring import RankConfig
+from src.llm_schemas.summary import SummaryResult
 
 
 
@@ -60,7 +61,51 @@ def render_why_ranked(expl: dict) -> str:
     </ul>
     """
 
-def render_item(*, idx: int, item: NewsItem, expl: dict) -> str:
+
+def render_summary(summary: SummaryResult | None) -> str:
+    """Render LLM summary with citations, or refusal reason."""
+    if summary is None:
+        return ""
+
+    # If refused, show the reason
+    if summary.refusal:
+        return f"""
+        <div class="summary refusal">
+          <p>Summary unavailable: {esc(summary.refusal)}</p>
+        </div>
+        """
+
+    # Build citations list
+    citations_html = ""
+    if summary.citations:
+        citation_items = []
+        for c in summary.citations:
+            snippet = esc(c.evidence_snippet)
+            url = esc(c.source_url)
+            citation_items.append(f'<li>"{snippet}" — <a href="{url}">source</a></li>')
+        citations_html = f"""
+        <div class="citations">
+          <strong>Citations:</strong>
+          <ul>{"".join(citation_items)}</ul>
+        </div>
+        """
+
+    # Build summary section
+    summary_text = esc(summary.summary or "")
+    tags_html = ""
+    if summary.tags:
+        tags_html = f'<div class="tags">Tags: {", ".join(esc(t) for t in summary.tags)}</div>'
+
+    return f"""
+    <div class="summary">
+      <p class="summary-text">{summary_text}</p>
+      {tags_html}
+      {citations_html}
+    </div>
+    """
+
+
+def render_item(*, idx: int, item: NewsItem, expl: dict, summary: SummaryResult | None = None) -> str:
     title = esc(item.title)
     url = esc(str(item.url))
     source = esc(item.source)
@@ -70,6 +115,7 @@ def render_item(*, idx: int, item: NewsItem, expl: dict) -> str:
     evidence_html = f"<p class='evidence'>{esc(evidence)}</p>" if evidence else ""
 
     why_html = render_why_ranked(expl)
+    summary_html = render_summary(summary)
 
     return f"""
     <div class="item">
@@ -77,6 +123,7 @@ def render_item(*, idx: int, item: NewsItem, expl: dict) -> str:
       <div class="main">
         <div class="title"><a href="{url}">{title}</a></div>
         <div class="meta">{source} • {published_at}</div>
+        {summary_html}
         {evidence_html}
         <div class="whywrap">
           <div class="whytitle">Why ranked</div>
@@ -87,13 +134,24 @@ def render_item(*, idx: int, item: NewsItem, expl: dict) -> str:
     """
 
 
-def render_digest_html(day, run, ranked_items, explanations, cfg, now, top_n) -> str:
+def render_digest_html(day, run, ranked_items, explanations, cfg, now, top_n, summaries=None) -> str:
+    """Render the full digest HTML page.
+
+    Args:
+        summaries: Optional list of SummaryResult, one per ranked item.
+                   If None, summaries section is omitted.
+    """
     header = render_run_header(day=day, run=run)
+
+    # Default to empty list if no summaries provided
+    if summaries is None:
+        summaries = [None] * len(ranked_items)
 
     blocks: list[str] = []
     for i, item in enumerate(ranked_items, start=1):
         expl = explanations[i - 1] if i - 1 < len(explanations) else {}
-        blocks.append(render_item(idx=i, item=item, expl=expl))
+        summary = summaries[i - 1] if i - 1 < len(summaries) else None
+        blocks.append(render_item(idx=i, item=item, expl=expl, summary=summary))
 
     items_html = "\n".join(blocks) if blocks else "<p><em>No items found for this day.</em></p>"
 
@@ -110,10 +168,17 @@ def render_digest_html(day, run, ranked_items, explanations, cfg, now, top_n) ->
         .rank {{ font-weight: 700; width: 40px; }}
         .title a {{ text-decoration: none; }}
         .meta {{ color: #555; font-size: 12px; margin-top: 4px; }}
-        .evidence {{ margin: 10px 0; color: #333; }}
+        .evidence {{ margin: 10px 0; color: #333; font-style: italic; }}
         .whywrap {{ background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 8px; }}
         .whytitle {{ font-weight: 600; margin-bottom: 6px; }}
         .why {{ margin: 0; padding-left: 18px; }}
+        .summary {{ background: #f0f7ff; border: 1px solid #cce0ff; padding: 12px; border-radius: 8px; margin: 10px 0; }}
+        .summary.refusal {{ background: #fff5f5; border-color: #ffcccc; }}
+        .summary-text {{ margin: 0 0 8px 0; }}
+        .tags {{ font-size: 12px; color: #666; margin-bottom: 8px; }}
+        .citations {{ font-size: 13px; }}
+        .citations ul {{ margin: 4px 0; padding-left: 20px; }}
+        .citations li {{ margin: 4px 0; }}
     </style>
     </head>
     <body>

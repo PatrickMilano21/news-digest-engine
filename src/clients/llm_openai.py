@@ -22,22 +22,28 @@ MODEL = "gpt-4o-mini"
 COST_PER_1K_PROMPT = 0.00015
 COST_PER_1K_COMPLETION = 0.0006
 
-SYSTEM_PROMPT = """You are a news summarization assistant. Given a news item and evidence, produce a JSON
-object with exactly this structure:
+SYSTEM_PROMPT = """You are a news summarization assistant. Given a news item and evidence, produce a JSON object.       
+
+STRICT RULES (violations will be rejected):
+1. Use ONLY the provided evidence. Do not use prior knowledge or external information.
+2. If evidence is insufficient to write a factual summary, return: {"refusal": "insufficient evidence"}
+3. Every factual claim in the summary MUST have a citation.
+4. Citation evidence_snippet MUST be an EXACT quote from the provided evidence (copy-paste, not paraphrase).
+5. Do not infer, extrapolate, or add information not explicitly stated in evidence.
+
+Output JSON structure:
 {
-"summary": "1-2 sentence summary of the news item",
+"summary": "1-2 sentence summary using only provided evidence",
 "tags": ["tag1", "tag2"],
 "citations": [
-    {"source_url": "the item's URL", "evidence_snippet": "quote from evidence"}
+    {"source_url": "the item's URL", "evidence_snippet": "EXACT quote from evidence"}
 ],
 "confidence": 0.0 to 1.0
 }
 
-Rules:
-- summary must be factual, based only on the provided evidence
-- citations must quote directly from the evidence provided
-- if you cannot summarize with confidence, return: {"refusal": "reason"}
-- respond with ONLY the JSON object, no markdown, no explanation
+If you cannot comply with all rules, return: {"refusal": "reason"}
+
+Respond with ONLY the JSON object. No markdown, no explanation, no preamble.
 """
 
 def summarize(item: NewsItem, evidence: str) -> SummaryResult:

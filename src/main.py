@@ -154,7 +154,9 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
     try:
         day = date.fromisoformat(date_str).isoformat()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD")
+    except TypeError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD")
 
     if top_n < 1:
         raise HTTPException(status_code=400, detail="top_n must be >= 1")

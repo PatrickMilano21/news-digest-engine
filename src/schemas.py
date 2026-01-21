@@ -15,3 +15,5 @@ class NewsItem(BaseModel):
 
 class IngestRequest(BaseModel):
     items: list[NewsItem] = Field(..., min_length=1)
+
+

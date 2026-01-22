@@ -96,6 +96,20 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
         """
     )
+    # summary_cache table - LLM summary caching (Day 17)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS summary_cache (
+            cache_key TEXT PRIMARY KEY,
+            model_name TEXT NOT NULL,
+            summary_json TEXT NOT NULL,
+            prompt_tokens INTEGER NOT NULL,
+            completion_tokens INTEGER NOT NULL,
+            cost_usd REAL NOT NULL,
+            latency_ms INTEGER NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """
+    )
     conn.commit()
 
     # Idempotent migration: add run_type column if missing (for existing DBs)

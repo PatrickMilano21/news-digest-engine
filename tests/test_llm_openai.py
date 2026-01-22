@@ -28,11 +28,16 @@ def test_summarize_no_api_key_returns_refusal():
 
     # Patch the module-level constant to None
     with patch("src.clients.llm_openai.OPENAI_API_KEY", None):
-        result = summarize(item, "some evidence")
-    
+        result, usage = summarize(item, "some evidence")
+
     assert isinstance(result, SummaryResult)
     assert result.refusal == LLM_DISABLED
     assert result.summary is None
+    # Verify zero usage when no API call made
+    assert usage["prompt_tokens"] == 0
+    assert usage["completion_tokens"] == 0
+    assert usage["cost_usd"] == 0.0
+    assert usage["latency_ms"] == 0
 
 def test_summarize_success_returns_summary_result():
     """When API returns valid JSON, return parsed SummaryResults."""
@@ -64,12 +69,17 @@ def test_summarize_success_returns_summary_result():
 
     with patch("src.clients.llm_openai.OPENAI_API_KEY", "fake-key"):
         with patch("urllib.request.urlopen", return_value=mock_response):
-            result = summarize(item, "Test evidence")
-    
+            result, usage = summarize(item, "Test evidence")
+
     assert isinstance(result, SummaryResult)
     assert result.summary == "This is a test summary."
     assert result.refusal is None
     assert len(result.citations) == 1
+    # Verify usage dict returned
+    assert usage["prompt_tokens"] == 100
+    assert usage["completion_tokens"] == 50
+    assert usage["cost_usd"] > 0
+    assert usage["latency_ms"] >= 0
 
 
 def test_summarize_api_error_returns_refusal():
@@ -84,11 +94,14 @@ def test_summarize_api_error_returns_refusal():
 
     with patch("src.clients.llm_openai.OPENAI_API_KEY", "fake-key"):
         with patch("urllib.request.urlopen", side_effect=Exception("Connection refused")):
-            result = summarize(item, "Test evidence")
-    
+            result, usage = summarize(item, "Test evidence")
+
     assert isinstance(result, SummaryResult)
     assert result.refusal == LLM_API_FAIL
     assert result.summary is None
+    # API failed before returning, so zero usage
+    assert usage["prompt_tokens"] == 0
+    assert usage["cost_usd"] == 0.0
 
 
 def test_summarize_retry_succeeds_after_parse_failure():
@@ -136,11 +149,14 @@ def test_summarize_retry_succeeds_after_parse_failure():
 
     with patch("src.clients.llm_openai.OPENAI_API_KEY", "fake-key"):
         with patch("urllib.request.urlopen", side_effect=fake_urlopen):
-            result = summarize(item, "Test evidence")
-    
+            result, usage = summarize(item, "Test evidence")
+
     assert isinstance(result, SummaryResult)
     assert result.summary == "Fixed summary."
     assert result.refusal is None
+    # Usage should include both calls (100+80 prompt, 50+40 completion)
+    assert usage["prompt_tokens"] == 180
+    assert usage["completion_tokens"] == 90
 
 
 def test_summarize_both_parses_fail_returns_refusal():
@@ -166,11 +182,14 @@ def test_summarize_both_parses_fail_returns_refusal():
 
     with patch("src.clients.llm_openai.OPENAI_API_KEY", "fake-key"):
         with patch("urllib.request.urlopen", return_value=mock_resp):
-            result = summarize(item, "Test evidence")
+            result, usage = summarize(item, "Test evidence")
 
     assert isinstance(result, SummaryResult)
     assert result.refusal == LLM_PARSE_FAIL
     assert result.summary is None
+    # Usage tracked even when parse fails (we still made API calls)
+    assert usage["prompt_tokens"] > 0
+    assert usage["cost_usd"] > 0
 
 
 def test_try_parse_valid_json_returns_summary_result():

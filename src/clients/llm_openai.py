@@ -46,14 +46,21 @@ If you cannot comply with all rules, return: {"refusal": "reason"}
 Respond with ONLY the JSON object. No markdown, no explanation, no preamble.
 """
 
-def summarize(item: NewsItem, evidence: str) -> SummaryResult:
+def summarize(item: NewsItem, evidence: str) -> tuple[SummaryResult, dict]:
     """
     Call OpenAI API and return a validated SummaryResult.
     Contract: 
     -ALWAYS returns SummaryResult (never raises)
     -Either (summary + citations) OR (refusal)
-    -Logs cost + latency on every call
+    -Logs cost + latency on every call  
+    Returns:
+        tuple of (SummaryResult, usage_dict)
+        usage_dict contains: prompt_tokens, completion_tokens, cost_usd, latency_ms
+    
+    # NOTE: Returned as tuple to avoid polluting SummaryResult with operational concerns.
+    # Can be refactored into a wrapper object later if needed.
     """
+
     if not OPENAI_API_KEY:
         return _refuse(LLM_DISABLED)
     
@@ -69,8 +76,15 @@ def summarize(item: NewsItem, evidence: str) -> SummaryResult:
     #Attempt 1: parse
     result = _try_parse(raw_response)
     if result:
-        _log_call(latency_ms=_elapsed_ms(t0), status="ok", **usage)
-        return result
+        latency = _elapsed_ms(t0)
+        cost = _compute_cost(usage["prompt_tokens"], usage["completion_tokens"])
+        _log_call(latency_ms=latency, status="ok", **usage)
+        return result, {
+            "prompt_tokens": usage["prompt_tokens"],
+            "completion_tokens": usage["completion_tokens"],
+            "cost_usd": cost,
+            "latency_ms": latency
+        }
     
     # Attempt 2: retry with "fix JSON" prompt
     try:
@@ -82,17 +96,38 @@ def summarize(item: NewsItem, evidence: str) -> SummaryResult:
 
     result = _try_parse(fixed_response)
     if result:
-        _log_call(latency_ms=_elapsed_ms(t0), status="ok_after_retry", **usage)
-        return result
+        latency = _elapsed_ms(t0)
+        cost = _compute_cost(usage["prompt_tokens"], usage["completion_tokens"])
+        _log_call(latency_ms=latency, status="ok_after_retry", **usage)
+        return result, {
+            "prompt_tokens": usage["prompt_tokens"],
+            "completion_tokens": usage["completion_tokens"],
+            "cost_usd": cost,
+            "latency_ms": latency
+        }
 
     # Both attempts failed
+    latency = _elapsed_ms(t0)
+    cost = _compute_cost(usage["prompt_tokens"], usage["completion_tokens"])
     _log_call(latency_ms=_elapsed_ms(t0), status="parse_fail", **usage)
-    return _refuse(LLM_PARSE_FAIL)
+    refusal_result, _ = _refuse(LLM_PARSE_FAIL)
+    return refusal_result, {
+        "prompt_tokens": usage["prompt_tokens"],
+        "completion_tokens": usage["completion_tokens"],
+        "cost_usd": cost,
+        "latency_ms": latency
+    }       
+    
 
 
-def _refuse(reason: str) -> SummaryResult:
-    """Return a valid SummaryResult with refusal."""
-    return SummaryResult(refusal=reason)
+def _refuse(reason: str) -> tuple[SummaryResult, dict]:
+    """Return a valid SummaryResult with refusal, plus zero usage."""
+    return SummaryResult(refusal=reason), {
+        "prompt_tokens": 0,
+        "completion_tokens": 0,
+        "cost_usd": 0.0,
+        "latency_ms": 0
+    }
 
 def _try_parse(raw):
     """Attempt to parse raw LLM output into SummaryResults. Returns None on failure"""
@@ -224,3 +259,10 @@ def _elapsed_ms(t0: float) -> int:
     """Calculate elapsed milliseconds since t0."""
     return int((time.perf_counter() - t0) * 1000)
 
+def _compute_cost(prompt_tokens: int, completion_tokens: int) -> float:
+    """Compute cost in USD from token counts."""
+    return round(
+        prompt_tokens / 1000 * COST_PER_1K_PROMPT +
+        completion_tokens / 1000 * COST_PER_1K_COMPLETION,
+        6
+    )

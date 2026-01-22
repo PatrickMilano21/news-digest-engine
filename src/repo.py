@@ -511,7 +511,66 @@ def report_failures_by_code(conn, *, end_day: str, days: int = 7) -> dict[str, i
     return {row[0]: row[1] for row in rows}
 
 
+def get_cached_summary(conn, *, cache_key: str) -> dict | None:
+    """
+    Look up a cahced LLM summary by cache key.
+    Args: 
+        Conn: database conneciton
+        cache_key: SHA-256 hash of (model|evidence)
+    Returns: 
+        dict with all chace columns if found, None if not found
+    """
+    cur = conn.execute(
+        """
+        SELECT cache_key, model_name, summary_json, prompt_tokens,
+        completion_tokens, cost_usd, latency_ms, created_at
+        FROM summary_cache
+        WHERE cache_key = ?
+        """, (cache_key,)
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return {
+        "cache_key": row[0],
+        "model_name": row[1],
+        "summary_json": row[2],
+        "prompt_tokens": row[3],
+        "completion_tokens": row[4],
+        "cost_usd": row[5],
+        "latency_ms": row[6],
+        "created_at": row[7],
+    }
 
+def insert_cached_summary(conn, *, cache_key: str, model_name: str, summary_json: str,
+    prompt_tokens: int, completion_tokens: int, cost_usd: float, latency_ms: int, created_at: str) -> None:
+    """
+    Store a summary in the cache.
+    
+    Uses INSERT OR IGNORE for idempotency — if cache_key exists,
+    this is a no-op (first write wins, cache entries are immutable).
+    
+    Args:
+        conn: Database connection
+        cache_key: SHA-256 hash of (model|evidence)
+        model_name: LLM model name (e.g., "gpt-4o-mini")
+        summary_json: Serialized SummaryResult
+        prompt_tokens: Token count from original call
+        completion_tokens: Token count from original call
+        cost_usd: Cost of original call
+        latency_ms: Latency of original call
+        created_at: ISO 8601 timestamp
+    """
+    conn.execute(
+        """
+        INSERT OR IGNORE INTO summary_cache
+        (cache_key, model_name, summary_json, prompt_tokens, completion_tokens, cost_usd,
+         latency_ms, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,(cache_key, model_name, summary_json, prompt_tokens,
+           completion_tokens, cost_usd, latency_ms, created_at)
+    )
+    conn.commit()
 
 
 

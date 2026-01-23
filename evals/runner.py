@@ -19,6 +19,9 @@ from evals.taxonomy import (
     EVAL_MISMATCH_TIEBREAK_OR_EXPECTATION,
 )
 
+# Summary quality evals
+from evals.summary_runner import run_all_cases as run_summary_cases, summarize_results as summarize_summary_results
+
 
 def run_eval_case(case, *, now) -> dict:
     
@@ -146,7 +149,7 @@ def format_report(out: dict) -> str:
 
     return "\n".join(lines)
 
-def write_eval_report(out: dict, *, day: str) -> str:
+def write_eval_report(out: dict, *, day: str, run_id: str | None = None) -> str:
     os.makedirs("artifacts", exist_ok=True)
     path = os.path.join("artifacts", f"eval_report_{day}.md")
 
@@ -163,8 +166,31 @@ def write_eval_report(out: dict, *, day: str) -> str:
         code = r.get("error_code") or "UNKNOWN"
         breakdown[code] = breakdown.get(code, 0) + 1
 
+    # Run summary quality evals
+    summary_results = run_summary_cases()
+    summary_stats = summarize_summary_results(summary_results)
+
+    # Calculate combined totals
+    combined_total = total + summary_stats["total"]
+    combined_passed = passed + summary_stats["passed"]
+    combined_rate = (combined_passed / combined_total * 100) if combined_total > 0 else 0.0
+
+    # Generate timestamp
+    generated_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+
     lines: list[str] = []
     lines.append(f"# Eval Report — {day}")
+    lines.append("")
+    lines.append(f"- **Generated**: {generated_at}")
+    if run_id:
+        lines.append(f"- **Run ID**: {run_id}")
+    lines.append(f"- **Overall**: {combined_rate:.1f}% ({combined_passed}/{combined_total})")
+    lines.append("")
+
+    # -------------------------------------------------------------------------
+    # Ranking Evals Section
+    # -------------------------------------------------------------------------
+    lines.append("## Ranking Evals")
     lines.append("")
     lines.append(f"- total: {total}")
     lines.append(f"- passed: {passed}")
@@ -172,7 +198,7 @@ def write_eval_report(out: dict, *, day: str) -> str:
     lines.append(f"- pass_rate: {pass_rate:.2%}")
     lines.append("")
 
-    lines.append("## Failure breakdown")
+    lines.append("### Failure breakdown")
     if not breakdown:
         lines.append("- (none)")
     else:
@@ -180,13 +206,13 @@ def write_eval_report(out: dict, *, day: str) -> str:
             lines.append(f"- {code}: {count}")
     lines.append("")
 
-    lines.append("## Failures (diffs)")
+    lines.append("### Failures (diffs)")
     any_fail = False
     for r in out["results"]:
         if r["pass"]:
             continue
         any_fail = True
-        lines.append(f"### {r['case_id']}")
+        lines.append(f"#### {r['case_id']}")
         lines.append(f"- error_code: {r.get('error_code')}")
         lines.append(f"- expected: {r.get('expected_titles')}")
         lines.append(f"- actual: {r.get('actual_titles')}")
@@ -199,6 +225,28 @@ def write_eval_report(out: dict, *, day: str) -> str:
     if not any_fail:
         lines.append("- (none)")
         lines.append("")
+
+    # -------------------------------------------------------------------------
+    # Summary Quality Evals Section
+    # -------------------------------------------------------------------------
+    lines.append("## Summary Quality Evals")
+    lines.append("")
+    lines.append(f"- total: {summary_stats['total']}")
+    lines.append(f"- passed: {summary_stats['passed']}")
+    lines.append(f"- failed: {summary_stats['failed']}")
+    lines.append(f"- pass_rate: {summary_stats['pass_rate']}%")
+    lines.append("")
+
+    lines.append("### Failures")
+    if not summary_stats["failures"]:
+        lines.append("- (none)")
+    else:
+        for f in summary_stats["failures"]:
+            lines.append(f"#### {f['name']}")
+            lines.append(f"- expected: {f['expected']}")
+            lines.append(f"- actual: {f['actual']}")
+            lines.append("")
+    lines.append("")
 
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))

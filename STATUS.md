@@ -1,82 +1,96 @@
 # Project Status — News Digest Engine
 
 ## Current Day
-**Day 18** (Week 3) — 2026-01-23 (COMPLETE)
+**Day 19** (Week 3) — 2026-01-23 (COMPLETE)
 
-## Today: Pipeline Integration + Idempotency + Safe Failure
+## Today: Eval v1 — Summary Quality Checks
 
 ### Goal
-Robust feedback system with idempotency protection, consistent error responses, and safe failure patterns.
+Build deterministic eval system for summary quality: citations, grounding, tags, refusals.
 
 ### Completed Steps
 
-#### Step 18.5: Feedback System with Idempotency ✓
-- Added 3 new tables: `idempotency_keys`, `run_feedback`, `item_feedback`
-- Created `RunFeedbackRequest`, `ItemFeedbackRequest` schemas
-- Added repo functions: `upsert_run_feedback`, `upsert_item_feedback`, `get_run_feedback`, `get_item_feedback`
-- Added endpoints: `POST /feedback/run`, `POST /feedback/item`
-- Idempotency via `X-Idempotency-Key` header
+#### Step 19.1: Summary Taxonomy ✓
+- Created `evals/summary_taxonomy.py` with failure codes
+- Codes: `SCHEMA_INVALID`, `MISSING_CITATIONS`, `SNIPPET_NOT_GROUNDED`, `URL_MISMATCH`, `INVALID_REFUSAL_CODE`, `NO_TAGS`, `TOO_MANY_TAGS`, `SUMMARY_TOO_SHORT`
+- Constants: `VALID_REFUSAL_CODES`, `MAX_TAGS=5`, `MIN_TAGS=1`, `MIN_SUMMARY_LENGTH=10`
 
-#### Step 18.6: Standardize Error Responses ✓
-- Added `RequestValidationError` exception handler
-- All errors return ProblemDetails format (status, code, message, request_id)
-- 422 validation errors include field location in message
+#### Step 19.2: Summary Check Functions ✓
+- Created `evals/summary_checks.py` with 7 check functions
+- Each returns failure code or None (pure functions, no side effects)
+- Fixed 4 bugs: `if` → `for` loops, missing colon, `return` in append
 
-#### Step 18.7: Request ID Propagation ✓
-- Audited all endpoints for X-Request-ID header
-- Confirmed middleware sets header on all responses
+#### Step 19.3: Summary Test Cases ✓
+- Created `evals/summary_cases.py` with 32 test cases
+- Categories: valid summaries, valid refusals, missing citations, bad grounding, URL mismatch, invalid refusal, tag issues, multiple failures, edge cases, summary length
 
-#### Step 18.8: Error Shape Tests ✓
-- `test_404_error_returns_problem_details`
-- `test_500_error_returns_problem_details_no_leak`
-- `test_different_idempotency_keys_processed_separately`
+#### Step 19.4: Summary Runner ✓
+- Created `evals/summary_runner.py` with `run_case()`, `run_all_cases()`, `summarize_results()`
+- Fixed 2 bugs: wrong import, wrong field name
 
-#### Step 18.9: Timed Drills ✓
-- **Drill A (Silent Failure):** Found typo `run_feedbak` + bare `except: return 0`
-- **Drill C (Race Condition):** Found idempotency check AFTER processing instead of BEFORE
-- Added `test_idempotency_skips_processing_on_second_request` to catch timing bugs
+#### Step 19.5: Verified 100% Pass Rate ✓
+- All 32 summary check cases pass
 
-### Files Created/Modified (Day 18)
-- `src/db.py` (MODIFIED - added idempotency_keys, run_feedback, item_feedback tables)
-- `src/schemas.py` (MODIFIED - added RunFeedbackRequest, ItemFeedbackRequest)
-- `src/repo.py` (MODIFIED - added upsert/get feedback functions, fixed indentation)
-- `src/main.py` (MODIFIED - added feedback endpoints, validation handler, fixed imports)
-- `tests/test_feedback.py` (NEW - 14 tests)
+#### Step 19.6: Combined Eval Report ✓
+- Modified `evals/runner.py` to include summary evals in same report
+- Report now shows: Ranking Evals (50) + Summary Quality Evals (32)
+- Added timestamp, run_id, overall combined stats
 
-### Key Design Decisions (Day 18)
-- **UPSERT for feedback** — user can change rating, same row updated
-- **Composite UNIQUE (run_id, item_url)** — one feedback per item per run
-- **Idempotency key is client-generated** — random UUID, not derived from data
-- **Check idempotency BEFORE processing** — order matters for correctness
-- **Never use bare `except:`** — hides bugs like typos
+#### Step 19.7: Pipeline Integration ✓
+- Modified `src/eval.py` to print both eval results
+- Console shows: ranking, summary, overall pass rates
+- JSON log includes all counts
+
+#### Step 19.8: Tests for Summary Checks ✓
+- Created `tests/test_summary_eval_harness.py`
+- Tests: load cases, all pass, summarize math, check_summary_length
+
+#### Step 19.9: Timed Drill ✓
+- Added `check_summary_length()` — fails if summary < 10 chars
+- Added `SUMMARY_TOO_SHORT` error code
+- Added 2 test cases + 3 unit tests
+
+### Files Created/Modified (Day 19)
+- `evals/summary_taxonomy.py` (NEW — failure codes + constants)
+- `evals/summary_checks.py` (NEW — 7 check functions)
+- `evals/summary_cases.py` (NEW — 32 test cases)
+- `evals/summary_runner.py` (NEW — case runner + summarizer)
+- `evals/runner.py` (MODIFIED — combined report with summary evals)
+- `src/eval.py` (MODIFIED — print both eval types)
+- `tests/test_summary_eval_harness.py` (NEW — 6 tests)
+
+### Key Design Decisions (Day 19)
+- **Evals are pure functions** — observe and report, never modify
+- **Failure codes not exceptions** — return strings, not raise
+- **Combined report** — one file with all eval types
+- **Fixture-driven testing** — predefined inputs + expected outputs
+- **Compare as sets** — order of failures doesn't matter
 
 ### Key Concepts Learned
-- **UPSERT** — `ON CONFLICT DO UPDATE` for insert-or-update in one statement
-- **Idempotency flow** — check → process → store (order matters!)
-- **Silent failures** — bare except + typos = bugs that hide
-- **Testing behavior vs output** — use monkeypatch to count function calls
-- **422 vs 400** — 422 for validation errors, 400 for malformed requests
-- **Frontend generates idempotency keys** — new key per user action, same key for retries
+- **Eval vs Enforcement** — evals measure, pipeline enforces
+- **Pure functions** — no side effects, deterministic
+- **frozenset** — immutable set for constants
+- **Multiple failure collection** — return list of all failures, not just first
+- **Meta-testing** — testing that our checks work correctly
 
 ## Tests
 - Command: `make test`
-- Result: 175 passed
+- Result: 181 passed
 
 ## Current Blockers
 - None
 
+## Day 18 Summary (Completed)
+- Feedback system with idempotency
+- UPSERT pattern, idempotency keys
+- ProblemDetails error format
+- 175 tests passed
+
 ## Day 17 Summary (Completed)
 - LLM caching with cache key strategy
-- `compute_cache_key()`, `summary_cache` table
-- Cache hits/misses logging and stats
 - 157 tests passed
 
-## Day 16 Summary (Completed)
-- Grounding + strict citations enforcement
-- `validate_grounding()` with exact substring match
-- 127 tests passed
-
-## Next (Day 19)
+## Next (Day 20)
 - TBD (check syllabus)
 
 ## Commands (known-good)
@@ -88,4 +102,3 @@ Robust feedback system with idempotency protection, consistent error responses, 
 - Query runs: `curl http://localhost:8000/runs/latest`
 - Debug run: `curl http://localhost:8000/debug/run/{run_id}`
 - UI: `http://localhost:8000/ui/date/2026-01-23`
-- Feedback: `curl -X POST http://localhost:8000/feedback/run -H "Content-Type: application/json" -d '{"run_id":"...", "rating":5}'`

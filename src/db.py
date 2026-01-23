@@ -110,6 +110,43 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     """
     )
+
+    # idempotency_keys table - prevents duplicate HTTP requests (Day 18)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS idempotency_keys (
+            id INTEGER PRIMARY KEY,
+            key TEXT NOT NULL UNIQUE,
+            endpoint TEXT NOT NULL,
+            response_json TEXT NOT NULL,
+            created_at TEXT NOT NULL
+        )
+    """)
+
+    # run_feedback table - overall digest rating (Day 18)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS run_feedback (
+            feedback_id INTEGER PRIMARY KEY,
+            run_id TEXT NOT NULL UNIQUE,
+            rating INTEGER NOT NULL CHECK (rating BETWEEN 1 AND 5),
+            comment TEXT,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+    """)
+
+    # item_feedback table - per-item usefulness rating (Day 18)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS item_feedback (
+            feedback_id INTEGER PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            item_url TEXT NOT NULL,
+            useful INTEGER NOT NULL CHECK (useful IN (0, 1)),
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            UNIQUE(run_id, item_url)
+        )
+    """)
+
     conn.commit()
 
     # Idempotent migration: add run_type column if missing (for existing DBs)

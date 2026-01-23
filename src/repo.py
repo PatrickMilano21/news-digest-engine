@@ -572,5 +572,127 @@ def insert_cached_summary(conn, *, cache_key: str, model_name: str, summary_json
     )
     conn.commit()
 
+def get_idempotency_response(conn, *, key: str) -> dict | None:
+    """Return cached response if idempotency key exists, else None."""
+    cur = conn.execute(
+        "SELECT key, endpoint, response_json, created_at FROM idempotency_keys WHERE key = ?",
+        (key,)
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None 
+    return {
+        "key": row[0],
+        "endpoint": row[1],
+        "response_json": row[2],
+        "created_at": row[3]
+    }
+
+def store_idempotency_response(conn, *, key: str, endpoint: str,
+                               response_json: str, created_at: str) -> None:
+    """Store response for idempotency key. INSERT OR IGNORE for safety."""
+    conn.execute(
+        """INSERT OR IGNORE INTO idempotency_keys (key, endpoint, response_json, created_at)
+           VALUES (?, ?, ?, ?)""",
+        (key, endpoint, response_json, created_at)
+    )
+    conn.commit()
+
+
+def upsert_run_feedback(conn, *, run_id: str, rating: int, comment: str | None,
+                        created_at: str, updated_at: str) -> int:
+    """
+    Insert or update feedback for a run (overall digest rating).
+
+    - First submit for run_id → INSERT new row
+    - Submit again for same run_id → UPDATE existing row
+
+    Returns:
+        feedback_id of the inserted/updated row
+    """
+
+    # Try INSERT first
+    cur = conn.execute(
+        """INSERT INTO run_feedback (run_id, rating, comment, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(run_id) DO UPDATE SET
+                rating = excluded.rating,
+                comment = excluded.comment,
+                updated_at = excluded.updated_at
+            RETURNING feedback_id""",
+        (run_id, rating, comment, created_at, updated_at)
+    )
+    row = cur.fetchone()
+    conn.commit()
+    return row[0]
+
+
+
+def upsert_item_feedback(conn, *, run_id: str, item_url: str, useful: int,
+                         created_at: str, updated_at: str) -> int:
+    """
+    Insert or update feedback for a specific item in a run.
+
+    - First submit for (run_id, item_url) → INSERT new row
+    - Submit again for same pair → UPDATE existing row
+
+    Args:
+        useful: 1 = useful (thumbs up), 0 = not useful (thumbs down)
+
+    Returns:
+        feedback_id of the inserted/updated row
+    """
+    cur = conn.execute(
+        """INSERT INTO item_feedback (run_id, item_url, useful, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(run_id, item_url) DO UPDATE SET
+               useful = excluded.useful,
+               updated_at = excluded.updated_at
+           RETURNING feedback_id""",
+        (run_id, item_url, useful, created_at, updated_at)
+    )
+    row = cur.fetchone()
+    conn.commit()
+    return row[0]
+
+
+def get_run_feedback(conn, *, run_id: str) -> dict | None:
+    """Get feedback for a run, if it exists."""
+    cur = conn.execute(
+        """SELECT feedback_id, run_id, rating, comment, created_at, updated_at
+           FROM run_feedback WHERE run_id = ?""",
+        (run_id,)
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return {
+        "feedback_id": row[0],
+        "run_id": row[1],
+        "rating": row[2],
+        "comment": row[3],
+        "created_at": row[4],
+        "updated_at": row[5],
+    }
+
+
+def get_item_feedback(conn, *, run_id: str, item_url: str) -> dict | None:
+    """Get feedback for a specific item in a run, if it exists."""
+    cur = conn.execute(
+        """SELECT feedback_id, run_id, item_url, useful, created_at, updated_at
+           FROM item_feedback WHERE run_id = ? AND item_url = ?""",
+        (run_id, item_url)
+    )
+    row = cur.fetchone()
+    if row is None:
+        return None
+    return {
+        "feedback_id": row[0],
+        "run_id": row[1],
+        "item_url": row[2],
+        "useful": row[3],
+        "created_at": row[4],
+        "updated_at": row[5],
+    }
 
 

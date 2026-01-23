@@ -1,0 +1,197 @@
+from __future__ import annotations
+
+import pytest
+from datetime import datetime, timezone
+from unittest.mock import patch
+
+from src.db import get_conn, init_db
+from src.repo import insert_news_items, get_run_by_day
+from src.schemas import NewsItem
+from src.llm_schemas.summary import SummaryResult
+
+
+# -----------------------------------------------------------------------------
+# Fixtures
+# -----------------------------------------------------------------------------
+
+@pytest.fixture
+def sample_items():
+    """Three items - one will fail summarization."""
+    return [
+        NewsItem(
+            source="test-source",
+            url="https://example.com/article-1",
+            title="Article One",
+            published_at=datetime(2026, 1, 22, 10, 0, 0, tzinfo=timezone.utc),
+            evidence="Evidence for article one.",
+        ),
+        NewsItem(
+            source="test-source",
+            url="https://example.com/fail-this-one",  # This one will fail
+            title="Article Two (Will Fail)",
+            published_at=datetime(2026, 1, 22, 11, 0, 0, tzinfo=timezone.utc),
+            evidence="Evidence for article two.",
+        ),
+        NewsItem(
+            source="test-source",
+            url="https://example.com/article-3",
+            title="Article Three",
+            published_at=datetime(2026, 1, 22, 12, 0, 0, tzinfo=timezone.utc),
+            evidence="Evidence for article three.",
+        ),
+    ]
+
+
+@pytest.fixture
+def valid_usage():
+    """Usage dict for successful summarize calls."""
+    return {
+        "prompt_tokens": 10,
+        "completion_tokens": 5,
+        "cost_usd": 0.001,
+        "latency_ms": 100,
+    }
+
+
+# -----------------------------------------------------------------------------
+# Test: Pipeline continues on summarization failure
+# -----------------------------------------------------------------------------
+
+def test_pipeline_continues_on_summarization_failure(monkeypatch, sample_items, valid_usage):
+    """
+    If one item's summarize() throws, the pipeline:
+    - Does NOT crash
+    - Continues to process other items
+    - Completes with return code 0
+    """
+    # Setup: insert items into DB
+    conn = get_conn()
+    init_db(conn)
+    insert_news_items(conn, sample_items)
+    conn.close()
+
+    # Mock summarize to fail on one specific item
+    def mock_summarize(item, evidence):
+        if "fail-this-one" in item.url:
+            raise ConnectionError("Simulated network failure")
+        return SummaryResult(
+            summary="Test summary",
+            tags=["test"],
+            citations=[],
+            confidence=0.9
+        ), valid_usage
+
+    monkeypatch.setattr("jobs.daily_run.summarize", mock_summarize)
+
+    # Run pipeline
+    from jobs.daily_run import main
+
+    # Mock sys.argv for argparse
+    monkeypatch.setattr("sys.argv", ["daily_run.py", "--date", "2026-01-22"])
+
+    result = main()
+
+    # Verify: run completed (didn't crash)
+    assert result == 0, "Pipeline should complete even when one item fails"
+
+
+def test_digest_written_when_summary_fails(monkeypatch, sample_items, valid_usage):
+    """
+    Even if a summary fails, the digest artifact should still be written.
+    """
+    import os
+
+    # Setup: insert items into DB
+    conn = get_conn()
+    init_db(conn)
+    insert_news_items(conn, sample_items)
+    conn.close()
+
+    # Mock summarize to fail on one specific item
+    def mock_summarize(item, evidence):
+        if "fail-this-one" in item.url:
+            raise ConnectionError("Simulated network failure")
+        return SummaryResult(
+            summary="Test summary",
+            tags=["test"],
+            citations=[],
+            confidence=0.9
+        ), valid_usage
+
+    monkeypatch.setattr("jobs.daily_run.summarize", mock_summarize)
+    monkeypatch.setattr("sys.argv", ["daily_run.py", "--date", "2026-01-22"])
+
+    # Run pipeline
+    from jobs.daily_run import main
+    result = main()
+
+    # Verify: digest artifact exists
+    digest_path = "artifacts/digest_2026-01-22.html"
+    assert os.path.exists(digest_path), "Digest should be written even with failures"
+
+
+def test_all_summaries_fail_digest_still_written(monkeypatch, sample_items):
+    """
+    Even if ALL summaries fail, the digest artifact should still exist.
+    """
+    import os
+
+    # Setup: insert items into DB
+    conn = get_conn()
+    init_db(conn)
+    insert_news_items(conn, sample_items)
+    conn.close()
+
+    # Mock summarize to ALWAYS fail
+    def mock_summarize_always_fails(item, evidence):
+        raise ConnectionError("Everything is broken")
+
+    monkeypatch.setattr("jobs.daily_run.summarize", mock_summarize_always_fails)
+    monkeypatch.setattr("sys.argv", ["daily_run.py", "--date", "2026-01-22"])
+
+    # Run pipeline
+    from jobs.daily_run import main
+    result = main()
+
+    # Verify: run completed
+    assert result == 0, "Pipeline should complete even when ALL summaries fail"
+
+    # Verify: digest artifact exists (will show refusals)
+    digest_path = "artifacts/digest_2026-01-22.html"
+    assert os.path.exists(digest_path), "Digest should be written even with all failures"
+
+
+def test_pipeline_completes_even_if_digest_fails(monkeypatch, sample_items, valid_usage):
+    """
+    If digest writing fails (e.g., disk full), pipeline still completes.
+    """
+    # Setup
+    conn = get_conn()
+    init_db(conn)
+    insert_news_items(conn, sample_items)
+    conn.close()
+
+    # Mock summarize to succeed
+    def mock_summarize(item, evidence):
+        return SummaryResult(
+            summary="Test summary",
+            tags=["test"],
+            citations=[],
+            confidence=0.9
+        ), valid_usage
+
+    monkeypatch.setattr("jobs.daily_run.summarize", mock_summarize)
+
+    # Mock render_digest_html to throw
+    def mock_render_fails(*args, **kwargs):
+        raise IOError("Simulated disk full")
+
+    monkeypatch.setattr("jobs.daily_run.render_digest_html", mock_render_fails)
+    monkeypatch.setattr("sys.argv", ["daily_run.py", "--date", "2026-01-22"])
+
+    # Run pipeline
+    from jobs.daily_run import main
+    result = main()
+
+    # Pipeline should still complete (digest failure is logged, not fatal)
+    assert result == 0, "Pipeline should complete even when digest writing fails"

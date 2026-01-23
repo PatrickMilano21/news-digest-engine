@@ -1,20 +1,28 @@
+import json
 import uuid
 import html as html_lib
 
 from datetime import datetime, timezone, date
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
+from fastapi.exceptions import RequestValidationError
 
 from src.middleware import request_id_middleware
 from src.logging_utils import log_event
 from src.errors import problem
 
-from src.schemas import IngestRequest
+from src.schemas import IngestRequest, RunFeedbackRequest, ItemFeedbackRequest
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id, get_run_failures_breakdown, get_run_artifacts, get_news_item_by_id, get_news_items_by_date_with_ids
+from src.repo import (
+    insert_news_items, start_run, finish_run_ok, finish_run_error,
+    get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id,
+    get_run_failures_breakdown, get_run_artifacts, get_news_item_by_id,
+    get_news_items_by_date_with_ids, get_idempotency_response,
+    store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
+)
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items, score_item
 from src.artifacts import render_digest_html
@@ -355,3 +363,187 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     resp = JSONResponse(status_code=500, content=payload.model_dump(exclude_none=True))
     resp.headers["X-Request-ID"] = rid
     return resp
+
+@app.post("/feedback/run")
+async def submit_run_feedback(
+    request: Request,
+    body: RunFeedbackRequest,
+    idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
+    """
+    Submit feedback for overall digest (1-5 star rating).
+    Submitting again for the same run_id UPDATES the existing feedback.
+    Supports idempotency: Include X-Idempotency-Key header for safe retries.
+    """
+    request_id = request.state.request_id
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        # 1. Check idempotency key FIRST (prevents double-click duplicates)
+        if idempotency_key:
+            cached = get_idempotency_response(conn, key=idempotency_key)
+            if cached:
+                log_event("run_feedback_idempotency_hit",
+                    request_id=request_id,
+                    idempotency_key=idempotency_key
+                )
+                return JSONResponse(
+                    status_code=200,
+                    content=json.loads(cached["response_json"]),
+                    headers={"X-Request-ID": request_id}
+                )
+
+        # 2. Process: Upsert feedback (only if not cached)
+        now = datetime.now(timezone.utc).isoformat()
+        feedback_id = upsert_run_feedback(
+            conn,
+            run_id=body.run_id,
+            rating=body.rating,
+            comment=body.comment,
+            created_at=now,
+            updated_at=now,
+        )
+
+        response_data = {
+            "status": "saved",
+            "feedback_id": feedback_id,
+            "run_id": body.run_id,
+            "rating": body.rating,
+            "request_id": request_id,
+        }
+
+        # 3. Store idempotency key (after successful processing)
+        if idempotency_key:
+            store_idempotency_response(
+                conn,
+                key=idempotency_key,
+                endpoint="/feedback/run",
+                response_json=json.dumps(response_data),
+                created_at=now,
+            )
+
+        log_event("run_feedback_saved",
+            request_id=request_id,
+            feedback_id=feedback_id,
+            run_id=body.run_id,
+            rating=body.rating,
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content=response_data,
+            headers={"X-Request-ID": request_id}
+        )
+    finally:
+        conn.close()
+
+
+@app.post("/feedback/item")
+async def submit_item_feedback(
+    request: Request,
+    body: ItemFeedbackRequest,
+    idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
+    """
+    Submit feedback for a specific item (thumbs up/down).
+    Submitting again for the same (run_id, item_url) UPDATES the existing feedback.
+    Supports idempotency: Include X-Idempotency-Key header for safe retries.
+    """
+    request_id = request.state.request_id
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        # Check idempotency key
+        if idempotency_key:
+            cached = get_idempotency_response(conn, key=idempotency_key)
+            if cached:
+                log_event("item_feedback_idempotency_hit",
+                    request_id=request_id,
+                    idempotency_key=idempotency_key
+                )
+                return JSONResponse(
+                    status_code=200,
+                    content=json.loads(cached["response_json"]),
+                    headers={"X-Request-ID": request_id}
+                )
+
+        # Upsert feedback (insert or update)
+        now = datetime.now(timezone.utc).isoformat()
+        useful_int = 1 if body.useful else 0
+        feedback_id = upsert_item_feedback(
+            conn,
+            run_id=body.run_id,
+            item_url=body.item_url,
+            useful=useful_int,
+            created_at=now,
+            updated_at=now,
+        )
+
+        response_data = {
+            "status": "saved",
+            "feedback_id": feedback_id,
+            "run_id": body.run_id,
+            "item_url": body.item_url,
+            "useful": body.useful,
+            "request_id": request_id,
+        }
+
+        # Store idempotency key
+        if idempotency_key:
+            store_idempotency_response(
+                conn,
+                key=idempotency_key,
+                endpoint="/feedback/item",
+                response_json=json.dumps(response_data),
+                created_at=now,
+            )
+
+        log_event("item_feedback_saved",
+            request_id=request_id,
+            feedback_id=feedback_id,
+            run_id=body.run_id,
+            item_url=body.item_url,
+            useful=body.useful,
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content=response_data,
+            headers={"X-Request-ID": request_id}
+        )
+    finally:
+        conn.close()
+
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return ProblemDetails for Pydantic validation errors."""
+    rid = request.state.request_id
+    run_id = getattr(request.state, "run_id", None)
+
+    # Extract first error for a clean message
+    errors = exc.errors()
+    if errors:
+        first = errors[0]
+        loc = ".".join(str(x) for x in first.get("loc", []))  #e.g., "body.rating"
+        msg = first.get("msg", "Validation error")
+        message = f"{loc}: {msg}"
+    else:
+        message = "Validation error"
+    
+    payload = problem(
+        status=422,
+        code="validation_error",
+        message=message,
+        request_id=rid,
+        run_id=run_id,
+    )
+
+    log_event("validation_error", request_id=rid, message=message)
+    resp = JSONResponse(status_code=422, content=payload.model_dump(exclude_none=True))
+    resp.headers["X-Request-ID"] = rid
+    return resp
+    

@@ -17,3 +17,16 @@ class IngestRequest(BaseModel):
     items: list[NewsItem] = Field(..., min_length=1)
 
 
+class RunFeedbackRequest(BaseModel):
+    """Request body for POST /feedback/run - rate overall digest."""
+    run_id: str
+    rating: int = Field(..., ge=1, le=5)  # 1-5 stars
+    comment: str | None = None
+
+
+class ItemFeedbackRequest(BaseModel):
+    """Request body for POST /feedback/item - rate single item usefulness."""
+    run_id: str
+    item_url: str
+    useful: bool  # True = thumbs up, False = thumbs down
+    

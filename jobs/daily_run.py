@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# Load .env file BEFORE other imports (so env vars are available)
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import json
 import os
@@ -29,6 +33,10 @@ from src.llm_schemas.summary import SummaryResult
 # Artifact generation
 from src.artifacts import render_digest_html
 
+# Eval harness
+from evals.runner import run_all as run_ranking_evals, write_eval_report
+from evals.summary_runner import run_all_cases as run_summary_evals, summarize_results as summarize_summary_evals
+
 # Repo functions (consolidated)
 from src.repo import (
     start_run,
@@ -46,10 +54,16 @@ from src.repo import (
 TOP_N = 10  # Number of items to rank and summarize
 
 
+FIXTURE_FEEDS = [
+    {"path": "fixtures/feeds/daily_run_fixture.xml", "source": "fixture"},
+]
+
+
 def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
     p.add_argument("--mode", default="fixtures", choices=["fixtures", "prod"])
+    p.add_argument("--force", action="store_true", help="Override idempotency check")
     args = p.parse_args()
 
     # Validate date
@@ -57,6 +71,7 @@ def main() -> int:
     day = args.date
 
     failures: dict[str, int] = {}
+    failed_sources: dict[str, list[str]] = {}  # {error_code: [path_or_url, ...]}
     stage_failures: dict[str, str] = {}
     t0: float = 0.0
     run_id = ""
@@ -66,11 +81,15 @@ def main() -> int:
         init_db(conn)
 
         # Idempotency: skip if already have successful run for this day
-        if get_run_by_day(conn, day=day):
+        existing_run = get_run_by_day(conn, day=day)
+        if existing_run and not args.force:
             run_id = uuid.uuid4().hex
             log_event("daily_run_skipped", run_id=run_id, day=day, reason="already_ok")
-            print(f"SKIP day={day} reason=already_ok")
+            print(f"SKIP day={day} reason=already_ok (use --force to override)")
             return 0
+        if existing_run and args.force:
+            log_event("daily_run_force", day=day, existing_run_id=existing_run["run_id"])
+            print(f"FORCE day={day} overriding existing run")
 
         # Start run
         run_id = uuid.uuid4().hex
@@ -87,42 +106,77 @@ def main() -> int:
         # Stage 1: INGEST
         # =====================================================================
         all_items = []
-        for feed in FEEDS:
-            url = feed["url"]
-            source = feed["source"]
 
-            result = fetch_rss_with_retry(url)
+        if args.mode == "fixtures":
+            # Load from local fixture files
+            for feed in FIXTURE_FEEDS:
+                path = feed["path"]
+                source = feed["source"]
+                try:
+                    with open(path, "r", encoding="utf-8") as f:
+                        xml_content = f.read()
+                    items = parse_rss(xml_content, source=source)
+                    all_items.extend(items)
+                    log_event("fixture_loaded", run_id=run_id, path=path, items=len(items))
+                except FileNotFoundError:
+                    log_event("fixture_not_found", run_id=run_id, path=path)
+                    print(f"FIXTURE_NOT_FOUND path={path}")
+                    failures["FIXTURE_NOT_FOUND"] = failures.get("FIXTURE_NOT_FOUND", 0) + 1
+                    failed_sources.setdefault("FIXTURE_NOT_FOUND", []).append(path)
+                except Exception as exc:
+                    log_event("fixture_parse_failed", run_id=run_id, path=path, error=str(exc))
+                    failures[PARSE_ERROR] = failures.get(PARSE_ERROR, 0) + 1
+                    failed_sources.setdefault(PARSE_ERROR, []).append(path)
+        else:
+            # Production mode: fetch from real RSS feeds
+            for feed in FEEDS:
+                url = feed["url"]
+                source = feed["source"]
 
-            if not result.ok:
-                log_event(
-                    "feed_fetch_failed",
-                    run_id=run_id,
-                    url=url,
-                    error_code=result.error_code,
-                    error_message=result.error_message,
-                )
-                code = result.error_code or "UNKNOWN"
-                failures[code] = failures.get(code, 0) + 1
-                continue
+                result = fetch_rss_with_retry(url)
 
-            try:
-                items = parse_rss(result.content, source=source)
-                all_items.extend(items)
-                log_event("feed_fetch_ok", run_id=run_id, url=url, items=len(items))
-            except Exception as exc:
-                log_event(
-                    "feed_parse_failed",
-                    run_id=run_id,
-                    url=url,
-                    error=str(exc),
-                )
-                failures[PARSE_ERROR] = failures.get(PARSE_ERROR, 0) + 1
-                continue
+                if not result.ok:
+                    log_event(
+                        "feed_fetch_failed",
+                        run_id=run_id,
+                        url=url,
+                        error_code=result.error_code,
+                        error_message=result.error_message,
+                    )
+                    code = result.error_code or "UNKNOWN"
+                    failures[code] = failures.get(code, 0) + 1
+                    failed_sources.setdefault(code, []).append(url)
+                    continue
+
+                try:
+                    items = parse_rss(result.content, source=source)
+                    all_items.extend(items)
+                    log_event("feed_fetch_ok", run_id=run_id, url=url, items=len(items))
+                except Exception as exc:
+                    log_event(
+                        "feed_parse_failed",
+                        run_id=run_id,
+                        url=url,
+                        error=str(exc),
+                    )
+                    failures[PARSE_ERROR] = failures.get(PARSE_ERROR, 0) + 1
+                    failed_sources.setdefault(PARSE_ERROR, []).append(url)
+                    continue
 
         # =====================================================================
         # Stage 2: DEDUPE
         # =====================================================================
         received = len(all_items)
+
+        # Early exit if no items received
+        if received == 0:
+            log_event("daily_run_no_items", run_id=run_id, day=day, mode=args.mode)
+            print(f"NO_ITEMS day={day} mode={args.mode} (no items received from feeds)")
+            # Still finish the run so we have a record
+            finished_at = datetime.now(timezone.utc).isoformat()
+            finish_run_ok(conn, run_id=run_id, finished_at=finished_at, after_dedupe=0, inserted=0, duplicates=0)
+            return 0
+
         deduped = normalize_and_dedupe(all_items)
         after_dedupe = len(deduped)
 
@@ -134,9 +188,9 @@ def main() -> int:
             inserted = 0
             duplicates = 0
 
-        # Store ingest failures
+        # Store ingest failures (with which feeds failed)
         if failures:
-            upsert_run_failures(conn, run_id=run_id, breakdown=failures)
+            upsert_run_failures(conn, run_id=run_id, breakdown=failures, sources=failed_sources)
 
         # Update received count
         conn.execute("UPDATE runs SET received = ? WHERE run_id = ?", (received, run_id))
@@ -170,7 +224,9 @@ def main() -> int:
             "total_cost_usd": 0.0,
             "saved_cost_usd": 0.0,
             "summary_failures": 0,
+            "llm_refusals": 0,
         }
+        refusal_breakdown: dict[str, int] = {}
 
         for item in ranked:
             try:
@@ -198,6 +254,16 @@ def main() -> int:
                             latency_ms=usage["latency_ms"],
                             created_at=datetime.now(timezone.utc).isoformat(),
                         )
+                    else:
+                        # Track refusals (LLM_DISABLED, LLM_API_FAIL, grounding failures, etc.)
+                        llm_stats["llm_refusals"] += 1
+                        refusal_code = validated.refusal
+                        refusal_breakdown[refusal_code] = refusal_breakdown.get(refusal_code, 0) + 1
+                        log_event("llm_refusal",
+                            run_id=run_id,
+                            item_url=str(item.url),
+                            refusal_code=refusal_code
+                        )
 
                     result = validated
                     llm_stats["cache_misses"] += 1
@@ -217,7 +283,11 @@ def main() -> int:
 
             summaries.append(result)
 
-        log_event("summarize_complete", run_id=run_id, **llm_stats)
+        # Store LLM refusals in run_failures table
+        if refusal_breakdown:
+            upsert_run_failures(conn, run_id=run_id, breakdown=refusal_breakdown)
+
+        log_event("summarize_complete", run_id=run_id, **llm_stats, refusal_breakdown=refusal_breakdown)
 
         # =====================================================================
         # Stage 5: DIGEST
@@ -227,7 +297,16 @@ def main() -> int:
             os.makedirs("artifacts", exist_ok=True)
             html = render_digest_html(
                 day=day,
-                run={"run_id": run_id},
+                run={
+                    "run_id": run_id,
+                    "status": "ok",
+                    "started_at": started_at,
+                    "finished_at": datetime.now(timezone.utc).isoformat(),
+                    "received": received,
+                    "after_dedupe": after_dedupe,
+                    "inserted": inserted,
+                    "duplicates": duplicates,
+                },
                 ranked_items=ranked,
                 explanations=explanations,
                 summaries=summaries,
@@ -245,14 +324,49 @@ def main() -> int:
             stage_failures["digest"] = str(e)
 
         # =====================================================================
-        # Stage 6: EVAL
+        # Stage 6: EVAL (automatic quality checks)
         # =====================================================================
+        eval_stats = {
+            "ranking_total": 0,
+            "ranking_passed": 0,
+            "ranking_failed": 0,
+            "summary_total": 0,
+            "summary_passed": 0,
+            "summary_failed": 0,
+            "overall_pass": True,
+        }
+        eval_report_path = None
         try:
-            # TODO: integrate eval harness
-            log_event("eval_skipped", run_id=run_id, reason="not_yet_integrated")
+            # Run ranking evals
+            ranking_results = run_ranking_evals(now=now)
+            eval_stats["ranking_total"] = ranking_results["total"]
+            eval_stats["ranking_passed"] = ranking_results["passed"]
+            eval_stats["ranking_failed"] = ranking_results["failed"]
+
+            # Run summary quality evals
+            summary_results = run_summary_evals()
+            summary_stats = summarize_summary_evals(summary_results)
+            eval_stats["summary_total"] = summary_stats["total"]
+            eval_stats["summary_passed"] = summary_stats["passed"]
+            eval_stats["summary_failed"] = summary_stats["failed"]
+
+            # Determine overall pass/fail
+            total_failed = eval_stats["ranking_failed"] + eval_stats["summary_failed"]
+            eval_stats["overall_pass"] = (total_failed == 0)
+
+            # Write eval report
+            eval_report_path = write_eval_report(ranking_results, day=day, run_id=run_id)
+            insert_run_artifact(conn, run_id=run_id, kind="eval_report", path=eval_report_path)
+
+            log_event("eval_complete",
+                run_id=run_id,
+                **eval_stats,
+                report_path=eval_report_path
+            )
         except Exception as e:
             log_event("eval_error", run_id=run_id, error=str(e))
             stage_failures["eval"] = str(e)
+            eval_stats["overall_pass"] = False
 
         # =====================================================================
         # Stage 7: COMPLETE
@@ -282,6 +396,7 @@ def main() -> int:
                 "summaries": len(summaries),
                 "llm_stats": llm_stats,
                 "stage_failures": stage_failures,
+                "refusal_breakdown": refusal_breakdown,
             }
         )
 
@@ -301,6 +416,7 @@ def main() -> int:
             failures_by_code=failures,
             stage_failures=stage_failures,
             llm_stats=llm_stats,
+            eval_stats=eval_stats,
             counts={
                 "received": received,
                 "after_dedupe": after_dedupe,
@@ -311,7 +427,8 @@ def main() -> int:
             },
         )
 
-        print(f"OK day={day} run_id={run_id} received={received} ranked={len(ranked)} summaries={len(summaries)}")      
+        eval_status = "PASS" if eval_stats["overall_pass"] else "FAIL"
+        print(f"OK day={day} run_id={run_id} received={received} ranked={len(ranked)} summaries={len(summaries)} evals={eval_status}")      
         return 0
 
     except Exception as exc:
@@ -352,3 +469,7 @@ def main() -> int:
 
     finally:
         conn.close()
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

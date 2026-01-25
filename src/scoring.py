@@ -5,9 +5,32 @@ from src.schemas import NewsItem
 
 
 class RankConfig(BaseModel):
-    topics: list[str] = Field(default_factory=list)
-    keyword_boosts: dict[str,float] = Field(default_factory=dict)
-    source_weights: dict[str, float] = Field(default_factory=dict)
+    # Default topics for tech news - matches add +1.0 to relevance
+    topics: list[str] = Field(default_factory=lambda: [
+        "AI", "artificial intelligence", "machine learning",
+        "startup", "funding", "raised",
+        "cloud", "AWS", "Azure", "Google Cloud",
+        "security", "cybersecurity", "breach",
+        "open source", "GitHub",
+    ])
+    # Keyword boosts - specific high-signal words
+    keyword_boosts: dict[str, float] = Field(default_factory=lambda: {
+        "million": 0.5,
+        "billion": 0.5,
+        "acquisition": 0.5,
+        "acquired": 0.5,
+        "breakthrough": 0.5,
+        "launches": 0.3,
+        "announces": 0.3,
+    })
+    # Source weights - trusted sources get boost
+    source_weights: dict[str, float] = Field(default_factory=lambda: {
+        "techcrunch": 1.2,
+        "hackernews": 1.1,
+        "arstechnica": 1.1,
+        "theverge": 1.0,
+        "wired": 1.0,
+    })
     search_fields: list[str] = Field(default_factory=lambda: ["title", "evidence"])
     recency_half_life_hours: float = 24.0 
 
@@ -49,7 +72,8 @@ def score_item(item: NewsItem, *, now: datetime, cfg: RankConfig) -> float:
     
     source_w = cfg.source_weights.get(item.source.lower(), 1.0)
 
-    base = relevance*float(source_w)
+    # Base score of 1.0 ensures recency always contributes, even with no topic/keyword matches
+    base = (1.0 + relevance) * float(source_w)
     return base * recency_decay
 
 

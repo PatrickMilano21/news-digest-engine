@@ -61,20 +61,20 @@ def test_ui_date_renders_items(client: TestClient):
 
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    assert f"Items for {day}" in resp.text
+    assert f"Digest for {day}" in resp.text
     assert "Test Article One" in resp.text
     assert "Test Article Two" in resp.text
 
 
-def test_ui_date_links_to_items(client: TestClient):
+def test_ui_date_links_to_articles(client: TestClient):
     day = "2026-01-20"
-    item_ids = seed_items_for_day(day)
+    seed_items_for_day(day)
 
     resp = client.get(f"/ui/date/{day}")
 
     assert resp.status_code == 200
-    for item_id in item_ids:
-        assert f"/ui/item/{item_id}" in resp.text
+    # Links go to the actual article URLs now
+    assert "https://example.com/" in resp.text
 
 
 def test_ui_date_404_no_items_returns_html(client: TestClient):
@@ -122,3 +122,54 @@ def test_ui_item_400_invalid_id_returns_html(client: TestClient):
 
     assert resp.status_code == 400
     assert "text/html" in resp.headers["content-type"]
+
+
+# --- / (home page) tests ---
+
+def test_home_page_returns_html(client: TestClient):
+    """Home page returns HTML with navigation."""
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "News Digest Engine" in resp.text
+
+
+def test_home_page_shows_date_links(client: TestClient):
+    """Home page shows links to date pages."""
+    day = "2026-01-20"
+    seed_items_for_day(day)
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert f"/ui/date/{day}" in resp.text
+
+
+def test_home_page_shows_debug_links(client: TestClient):
+    """Home page includes links to debug tools."""
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert "/debug/stats" in resp.text
+    assert "/docs" in resp.text
+    assert "/health" in resp.text
+
+
+def test_home_page_shows_recent_runs(client: TestClient):
+    """Home page shows recent runs when they exist."""
+    # Create a run
+    conn = get_conn()
+    try:
+        init_db(conn)
+        run_id = uuid.uuid4().hex
+        start_run(conn, run_id=run_id, started_at="2026-01-20T12:00:00Z", received=5)
+        finish_run_ok(conn, run_id=run_id, finished_at="2026-01-20T12:01:00Z",
+                      after_dedupe=5, inserted=5, duplicates=0)
+    finally:
+        conn.close()
+
+    resp = client.get("/")
+
+    assert resp.status_code == 200
+    assert f"/debug/run/{run_id}" in resp.text

@@ -48,6 +48,8 @@ def render_why_ranked(expl: dict) -> str:
     source_weight = expl.get("source_weight", 1.0)
     age_hours = expl.get("age_hours", 0.0)
     recency_decay = expl.get("recency_decay", 1.0)
+    relevance = expl.get("relevance", 0.0)
+    total_score = expl.get("total_score", 0.0)
 
     topics_str = ", ".join(esc(str(t)) for t in topics) if topics else "None"
     kw_str = ", ".join(f"{esc(k['keyword'])} (+{k['boost']})" for k in kws) if kws else "None"
@@ -56,8 +58,10 @@ def render_why_ranked(expl: dict) -> str:
     <ul class="why">
       <li><strong>Topics matched:</strong> {topics_str}</li>
       <li><strong>Keyword boosts:</strong> {kw_str}</li>
+      <li><strong>Relevance:</strong> {relevance}</li>
       <li><strong>Source weight:</strong> ×{source_weight}</li>
       <li><strong>Recency:</strong> age={age_hours}h decay={recency_decay}</li>
+      <li><strong>Total Score:</strong> {total_score}</li>
     </ul>
     """
 

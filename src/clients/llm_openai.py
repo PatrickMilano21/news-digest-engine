@@ -62,6 +62,7 @@ def summarize(item: NewsItem, evidence: str) -> tuple[SummaryResult, dict]:
     """
 
     if not OPENAI_API_KEY:
+        log_event("llm_disabled", reason="OPENAI_API_KEY not set")
         return _refuse(LLM_DISABLED)
     
     t0 = time.perf_counter()

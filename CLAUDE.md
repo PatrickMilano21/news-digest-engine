@@ -150,10 +150,12 @@ RSS XML → rss_fetch.py → rss_parse.py → normalize.py → repo.py (SQLite)
 
 ### Key Modules
 
-- **`src/main.py`**: FastAPI app with endpoints `/ingest/raw`, `/rank/{date}`, `/digest/{date}`, `/runs/latest`
+- **`src/main.py`**: FastAPI routes only — thin handlers that delegate to other modules
+- **`src/views.py`**: Display/presentation logic — builds view models for templates (changes often with UI)
 - **`src/schemas.py`**: `NewsItem` model + normalization functions (`normalize_url`, `normalize_title`, `dedupe_key`)
 - **`src/scoring.py`**: `RankConfig` model + `rank_items()` - deterministic ranking by score → timestamp → index
 - **`src/repo.py`**: SQLite CRUD for `news_items` and `runs` tables
+- **`src/explain.py`**: Score explanations — why an item ranked where it did
 - **`jobs/daily_run.py`**: CLI for daily batch job with idempotency (skips if run exists for day)
 - **`jobs/build_digest.py`**: Generates HTML digest artifacts
 
@@ -190,14 +192,154 @@ SHA256 of `normalized_url|normalized_title` produces stable `dedupe_key`. Python
 ### Ranking Algorithm
 
 ```python
-score = (topic_matches + keyword_boosts) × source_weight × recency_decay
+score = (1.0 + relevance) × source_weight × recency_decay
+# where relevance = topic_matches + keyword_boosts
 ```
 
+Base score of 1.0 ensures recency always contributes. Default topics include: AI, startup, funding, cloud, security, open source.
+
 Ties broken by: score desc → published_at desc → original index asc
+
+## Code Organization Patterns
+
+**IMPORTANT**: Follow these patterns to keep the codebase maintainable.
+
+### Directory Structure
+
+```
+src/
+├── main.py          # FastAPI routes ONLY (no HTML, minimal logic)
+├── views.py         # Display/presentation logic (view models for templates)
+├── repo.py          # ALL database access (SQLite CRUD)
+├── db.py            # Database connection + schema init
+├── schemas.py       # Pydantic models + validation
+├── scoring.py       # Ranking algorithm
+├── explain.py       # Score explanations
+├── artifacts.py     # Static file generation (digest HTML saved to disk)
+├── clients/         # External API clients (LLM, etc.)
+└── llm_schemas/     # LLM-specific schemas
+
+templates/           # Jinja2 templates for web UI
+├── _base.html       # Base layout (inherited by all pages)
+├── home.html        # Home page
+├── date.html        # Date digest page
+└── item.html        # Item detail page
+
+jobs/                # CLI batch jobs
+├── daily_run.py     # Daily pipeline
+└── build_digest.py  # Digest artifact builder
+
+tests/               # All tests (mirror src/ structure)
+evals/               # Evaluation cases and runner
+```
+
+### Where Code Belongs
+
+| Type of Code | Location | Notes |
+|--------------|----------|-------|
+| **API routes** | `src/main.py` | Route definitions only. Call other modules for logic. |
+| **Display/view logic** | `src/views.py` | Builds view models for templates. Changes often with UI. |
+| **HTML for web UI** | `templates/*.html` | Jinja2 templates. NEVER inline HTML in Python. |
+| **HTML for artifacts** | `src/artifacts.py` | Static digest files saved to `artifacts/`. |
+| **Database queries** | `src/repo.py` | All SQLite access. No raw SQL elsewhere. |
+| **Business logic** | `src/scoring.py`, `src/explain.py`, etc. | Pure functions, testable in isolation. |
+| **Pydantic models** | `src/schemas.py` | Request/response models, validation. |
+| **External APIs** | `src/clients/*.py` | Isolated clients with clear interfaces. |
+
+### Anti-Patterns (DO NOT DO)
+
+| Bad Pattern | Why It's Bad | Correct Approach |
+|-------------|--------------|------------------|
+| Inline HTML in `main.py` | Hard to maintain, can't use template inheritance | Use `templates/*.html` with `TemplateResponse` |
+| Raw SQL in route handlers | Scattered DB logic, hard to test | Call `repo.py` functions |
+| Business logic in routes | Routes become bloated, untestable | Extract to dedicated modules |
+| Display logic in routes | UI changes require editing routes | Use `views.py` for view models |
+| Duplicate HTML rendering | Two systems doing same thing | Consolidate or clearly separate purposes |
+
+### Template Pattern
+
+Routes that return HTML should follow this pattern:
+
+```python
+# In main.py
+@app.get("/ui/page", response_class=HTMLResponse)
+def ui_page(request: Request):
+    # 1. Fetch data from repo
+    conn = get_conn()
+    try:
+        data = get_something(conn)
+    finally:
+        conn.close()
+
+    # 2. Return template response (NO inline HTML)
+    return templates.TemplateResponse(
+        request,
+        "page.html",
+        {"data": data}
+    )
+```
+
+### Two HTML Systems (Intentional)
+
+We have two HTML generation systems for different purposes:
+
+1. **`templates/`** → Dynamic web UI (served by FastAPI)
+   - Uses Jinja2 inheritance (`_base.html`)
+   - Interactive features (feedback buttons, etc.)
+   - Real-time data from database
+
+2. **`artifacts.py`** → Static digest files (saved to disk)
+   - Self-contained HTML files in `artifacts/`
+   - Generated by batch jobs
+   - Can be viewed offline or shared
+
+These are intentionally separate. Do not merge them.
 
 ## Testing
 
 Tests use isolated temp SQLite via `conftest.py` autouse fixture that sets `NEWS_DB_PATH`. All tests are deterministic with fixed timestamps and fixture data.
+
+### Testing Patterns
+
+Before writing new tests:
+1. **Check existing tests** for established patterns (imports, fixtures, assertions)
+2. **Add to existing test files** if testing related functionality
+3. **Create new test file** only if testing a distinct module or feature
+
+Test file organization:
+- `test_repo.py` — database/repo layer tests
+- `test_demo_flow.py` — API endpoint tests (routes, responses)
+- `test_pipeline.py` — batch job integration tests
+- `test_llm_openai.py` — LLM client tests
+- `test_scoring.py` — ranking algorithm tests
+
+## After Implementing Features (MANDATORY)
+
+After ANY code change that adds new functionality, Claude MUST:
+
+1. **Run `make test`** - verify existing tests pass
+2. **Ask: "Does this change need new tests?"**
+   - New function or endpoint? → Add unit test
+   - New error path or refusal? → Add test for that path
+   - Changed output format? → Update existing tests
+   - New user-facing behavior? → Consider eval case
+3. **If yes, write tests** before marking the task complete
+4. **Run `make test` again** to verify new tests pass
+5. **Update DEBUG_GUIDE.md** with what changed
+
+**Test coverage checklist:**
+- [ ] New functions have at least one test
+- [ ] Error paths are tested (not just happy path)
+- [ ] New fields in responses are verified in tests
+- [ ] Logging events are tested if critical
+
+**UI changes checklist:**
+- [ ] New routes/pages? → Add to `ui_smoke` MCP tool
+- [ ] Changed URL patterns? → Update `ui_smoke` regex
+- [ ] Changed link structure? → Update `ui_smoke` checks
+- [ ] Just styling/content? → No MCP update needed
+
+This is NON-NEGOTIABLE. Do not skip this step.
 
 ## Operability Conventions
 

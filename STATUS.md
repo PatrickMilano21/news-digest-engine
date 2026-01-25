@@ -1,104 +1,65 @@
 # Project Status — News Digest Engine
 
 ## Current Day
-**Day 19** (Week 3) — 2026-01-23 (COMPLETE)
+**Day 20** (Week 3) — 2026-01-25
 
-## Today: Eval v1 — Summary Quality Checks
+## Today: Code Review + Refactoring + Test Coverage
 
 ### Goal
-Build deterministic eval system for summary quality: citations, grounding, tags, refusals.
+Review all Day 20 changes, add missing tests, clean up code organization, document patterns.
 
 ### Completed Steps
 
-#### Step 19.1: Summary Taxonomy ✓
-- Created `evals/summary_taxonomy.py` with failure codes
-- Codes: `SCHEMA_INVALID`, `MISSING_CITATIONS`, `SNIPPET_NOT_GROUNDED`, `URL_MISMATCH`, `INVALID_REFUSAL_CODE`, `NO_TAGS`, `TOO_MANY_TAGS`, `SUMMARY_TOO_SHORT`
-- Constants: `VALID_REFUSAL_CODES`, `MAX_TAGS=5`, `MIN_TAGS=1`, `MIN_SUMMARY_LENGTH=10`
+#### Test Coverage
+- Added 11 new tests for Tasks #1-#12 features
+- Failed sources tracking: 5 tests
+- /debug/stats scoping: 2 tests
+- Evals in pipeline: 3 tests
+- LLM disabled logging: 1 test
+- Total: 201 tests passing
 
-#### Step 19.2: Summary Check Functions ✓
-- Created `evals/summary_checks.py` with 7 check functions
-- Each returns failure code or None (pure functions, no side effects)
-- Fixed 4 bugs: `if` → `for` loops, missing colon, `return` in append
+#### Code Cleanup
+- Removed redundant `get_run_failures_breakdown()` function
+- Extracted display logic from `main.py` to new `src/views.py`
+- Route handlers now thin — delegate to views.py for presentation
 
-#### Step 19.3: Summary Test Cases ✓
-- Created `evals/summary_cases.py` with 32 test cases
-- Categories: valid summaries, valid refusals, missing citations, bad grounding, URL mismatch, invalid refusal, tag issues, multiple failures, edge cases, summary length
+#### Documentation
+- Updated CLAUDE.md with views.py in all relevant sections
+- Created future.md for planned future work
 
-#### Step 19.4: Summary Runner ✓
-- Created `evals/summary_runner.py` with `run_case()`, `run_all_cases()`, `summarize_results()`
-- Fixed 2 bugs: wrong import, wrong field name
+### Files Created/Modified (Day 20)
+- `src/views.py` (NEW — display/presentation logic)
+- `src/main.py` (MODIFIED — simplified, uses views.py)
+- `src/repo.py` (MODIFIED — removed redundant function)
+- `tests/test_demo_flow.py` (MODIFIED — added 2 tests)
+- `tests/test_pipeline.py` (MODIFIED — added 4 tests)
+- `tests/test_repo.py` (MODIFIED — added 5 tests, updated 1)
+- `CLAUDE.md` (MODIFIED — documented views.py pattern)
+- `future.md` (NEW — future work planning)
 
-#### Step 19.5: Verified 100% Pass Rate ✓
-- All 32 summary check cases pass
+### Key Design Decisions (Day 20)
+- **views.py for display logic** — UI changes don't require editing routes
+- **Remove redundant functions** — get_run_failures_with_sources supersedes breakdown-only version
+- **Test behavior, not implementation** — use getter functions, not raw SQL in tests
 
-#### Step 19.6: Combined Eval Report ✓
-- Modified `evals/runner.py` to include summary evals in same report
-- Report now shows: Ranking Evals (50) + Summary Quality Evals (32)
-- Added timestamp, run_id, overall combined stats
-
-#### Step 19.7: Pipeline Integration ✓
-- Modified `src/eval.py` to print both eval results
-- Console shows: ranking, summary, overall pass rates
-- JSON log includes all counts
-
-#### Step 19.8: Tests for Summary Checks ✓
-- Created `tests/test_summary_eval_harness.py`
-- Tests: load cases, all pass, summarize math, check_summary_length
-
-#### Step 19.9: Timed Drill ✓
-- Added `check_summary_length()` — fails if summary < 10 chars
-- Added `SUMMARY_TOO_SHORT` error code
-- Added 2 test cases + 3 unit tests
-
-### Files Created/Modified (Day 19)
-- `evals/summary_taxonomy.py` (NEW — failure codes + constants)
-- `evals/summary_checks.py` (NEW — 7 check functions)
-- `evals/summary_cases.py` (NEW — 32 test cases)
-- `evals/summary_runner.py` (NEW — case runner + summarizer)
-- `evals/runner.py` (MODIFIED — combined report with summary evals)
-- `src/eval.py` (MODIFIED — print both eval types)
-- `tests/test_summary_eval_harness.py` (NEW — 6 tests)
-
-### Key Design Decisions (Day 19)
-- **Evals are pure functions** — observe and report, never modify
-- **Failure codes not exceptions** — return strings, not raise
-- **Combined report** — one file with all eval types
-- **Fixture-driven testing** — predefined inputs + expected outputs
-- **Compare as sets** — order of failures doesn't matter
-
-### Key Concepts Learned
-- **Eval vs Enforcement** — evals measure, pipeline enforces
-- **Pure functions** — no side effects, deterministic
-- **frozenset** — immutable set for constants
-- **Multiple failure collection** — return list of all failures, not just first
-- **Meta-testing** — testing that our checks work correctly
-
-## Tests
+### Tests
 - Command: `make test`
-- Result: 181 passed
+- Result: 201 passed
 
 ## Current Blockers
 - None
 
-## Day 18 Summary (Completed)
-- Feedback system with idempotency
-- UPSERT pattern, idempotency keys
-- ProblemDetails error format
-- 175 tests passed
-
-## Day 17 Summary (Completed)
-- LLM caching with cache key strategy
-- 157 tests passed
-
-## Next (Day 20)
-- TBD (check syllabus)
+## Next
+- Task #11: Per-user RankConfig customization (future scope)
+- Consider more UI improvements
+- Production deployment preparation
 
 ## Commands (known-good)
 - Activate venv: `.\.venv\Scripts\Activate.ps1`
 - Tests: `make test`
 - Dev: `make dev`
-- Daily run: `make run DATE=2026-01-23`
-- Eval: `make eval DATE=2026-01-23`
+- Daily run: `make run DATE=2026-01-25`
+- Eval: `make eval DATE=2026-01-25`
 - Query runs: `curl http://localhost:8000/runs/latest`
 - Debug run: `curl http://localhost:8000/debug/run/{run_id}`
-- UI: `http://localhost:8000/ui/date/2026-01-23`
+- UI: `http://localhost:8000/`

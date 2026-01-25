@@ -294,7 +294,9 @@ def get_run_by_id(conn, *, run_id: str) -> dict | None:
         """
         SELECT run_id, started_at, finished_at, status,
             received, after_dedupe, inserted, duplicates,
-            error_type, error_message, run_type
+            error_type, error_message, run_type,
+            llm_cache_hits, llm_cache_misses, llm_total_cost_usd,
+            llm_saved_cost_usd, llm_total_latency_ms
         FROM runs
         WHERE run_id = ?
         LIMIT 1;
@@ -317,37 +319,102 @@ def get_run_by_id(conn, *, run_id: str) -> dict | None:
         "error_type": row[8],
         "error_message": row[9],
         "run_type": row[10],
+        "llm_cache_hits": row[11] or 0,
+        "llm_cache_misses": row[12] or 0,
+        "llm_total_cost_usd": row[13] or 0.0,
+        "llm_saved_cost_usd": row[14] or 0.0,
+        "llm_total_latency_ms": row[15] or 0,
     }
 
 
-def upsert_run_failures(conn: sqlite3.Connection, *, run_id: str, breakdown: dict[str, int]) -> None:
+def update_run_llm_stats(
+    conn: sqlite3.Connection,
+    run_id: str,
+    *,
+    cache_hits: int,
+    cache_misses: int,
+    total_cost_usd: float,
+    saved_cost_usd: float,
+    total_latency_ms: int,
+) -> None:
+    """
+    Update LLM statistics for a run.
+
+    Called after digest generation completes.
+    Idempotent: overwrites previous values if called again.
+    """
+    conn.execute(
+        """
+        UPDATE runs SET
+            llm_cache_hits = ?,
+            llm_cache_misses = ?,
+            llm_total_cost_usd = ?,
+            llm_saved_cost_usd = ?,
+            llm_total_latency_ms = ?
+        WHERE run_id = ?
+        """,
+        (cache_hits, cache_misses, total_cost_usd, saved_cost_usd, total_latency_ms, run_id),
+    )
+    conn.commit()
+
+
+def upsert_run_failures(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    breakdown: dict[str, int],
+    sources: dict[str, list[str]] | None = None,
+) -> None:
+    """Store failure counts and optionally the sources (URLs/paths) that failed.
+
+    Args:
+        breakdown: {error_code: count}
+        sources: {error_code: [url1, url2, ...]} - optional, stores which feeds failed
+    """
     conn.execute("DELETE FROM run_failures WHERE run_id = ?;", (run_id,))
 
     created_at = datetime.now(timezone.utc).isoformat()
+    sources = sources or {}
+
     for error_code, count in breakdown.items():
+        failed_sources = sources.get(error_code, [])
+        failed_sources_json = json.dumps(failed_sources) if failed_sources else None
         conn.execute(
             """
-            INSERT INTO run_failures (run_id, error_code, count, created_at)
-            VALUES (?, ?, ?, ?);
-            """,(run_id, error_code, count, created_at)
+            INSERT INTO run_failures (run_id, error_code, count, failed_sources, created_at)
+            VALUES (?, ?, ?, ?, ?);
+            """, (run_id, error_code, count, failed_sources_json, created_at)
         )
 
     conn.commit()
 
-def get_run_failures_breakdown(conn, *, run_id: str) -> dict[str, int]:
+
+def get_run_failures_with_sources(conn, *, run_id: str) -> dict:
+    """Get failure counts AND which sources failed.
+
+    Returns:
+        {
+            "by_code": {"PARSE_ERROR": 1, "FETCH_ERROR": 2},
+            "failed_sources": {"PARSE_ERROR": ["broken.xml"], "FETCH_ERROR": ["url1", "url2"]}
+        }
+    """
     rows = conn.execute(
         """
-        SELECT error_code, count
+        SELECT error_code, count, failed_sources
         FROM run_failures
         WHERE run_id = ?;
         """,
         (run_id,),
     ).fetchall()
 
-    breakdown = {}
-    for error_code, count in rows:
-        breakdown[error_code] = count
-    return breakdown
+    by_code = {}
+    failed_sources = {}
+    for error_code, count, sources_json in rows:
+        by_code[error_code] = count
+        if sources_json:
+            failed_sources[error_code] = json.loads(sources_json)
+
+    return {"by_code": by_code, "failed_sources": failed_sources}
 
 
 def insert_run_artifact(conn: sqlite3.Connection, *, run_id: str, kind: str, path: str) -> None:

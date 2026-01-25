@@ -1,0 +1,177 @@
+{% extends "_base.html" %}
+
+{% block title %}News Digest Engine{% endblock %}
+
+{% block head %}
+<style>
+    h1 { color: #333; margin-bottom: 20px; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 0; border-bottom: 2px solid #ddd; margin-bottom: 20px; }
+    .tab { padding: 12px 24px; cursor: pointer; border: none; background: #f5f5f5; font-size: 14px; font-weight: 500; }
+    .tab:hover { background: #e8e8e8; }
+    .tab.active { background: #fff; border-bottom: 2px solid #0066cc; margin-bottom: -2px; color: #0066cc; }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Tables */
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eee; }
+    th { background: #f9f9f9; font-weight: 600; }
+
+    /* Stars */
+    .stars { font-size: 20px; }
+    .star { cursor: pointer; color: #ccc; transition: color 0.15s; }
+    .star:hover, .star.active { color: #f5a623; }
+    .star.filled { color: #f5a623; }
+
+    /* Status */
+    .status-ok { color: #2e7d32; }
+    .status-error { color: #c62828; }
+
+    /* Pagination */
+    .pagination { margin-top: 16px; display: flex; gap: 8px; align-items: center; }
+    .pagination a, .pagination span { padding: 8px 12px; border: 1px solid #ddd; border-radius: 4px; text-decoration: none; }
+    .pagination a:hover { background: #f5f5f5; }
+    .pagination .disabled { color: #999; }
+
+    /* Debug section */
+    .debug-links { display: flex; gap: 16px; flex-wrap: wrap; }
+    .debug-links a { padding: 12px 20px; background: #f9f9f9; border-radius: 8px; border: 1px solid #ddd; }
+    .debug-links a:hover { background: #f0f0f0; text-decoration: none; }
+</style>
+{% endblock %}
+
+{% block content %}
+<h1>News Digest Engine</h1>
+
+<div class="tabs">
+    <button class="tab active" data-tab="digests">Digests</button>
+    <button class="tab" data-tab="runs">Runs</button>
+    <button class="tab" data-tab="debug">Debug</button>
+</div>
+
+<div id="digests" class="tab-content active">
+    <table>
+        <thead>
+            <tr><th>Date</th><th>Rating</th></tr>
+        </thead>
+        <tbody>
+            {% if dates %}
+                {% for d in dates %}
+                <tr data-run-id="{{ date_runs.get(d, '') }}">
+                    <td><a href="/ui/date/{{ d }}">{{ d }}</a></td>
+                    <td class="stars" data-run-id="{{ date_runs.get(d, '') }}" data-current-rating="{{ date_ratings.get(d, 0) }}">
+                        {% for i in range(1, 6) %}
+                            {% set rating = date_ratings.get(d, 0) %}
+                            <span class="star{% if i <= rating %} filled{% endif %}" data-rating="{{ i }}">{% if i <= rating %}&#9733;{% else %}&#9734;{% endif %}</span>
+                        {% endfor %}
+                    </td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="2"><em>No digests yet</em></td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+    <div class="pagination">
+        {% if has_prev %}
+            <a href="/?page={{ page - 1 }}">&#8592; Prev</a>
+        {% else %}
+            <span class="disabled">&#8592; Prev</span>
+        {% endif %}
+        <span>Page {{ page }} of {{ total_pages }}</span>
+        {% if has_next %}
+            <a href="/?page={{ page + 1 }}">Next &#8594;</a>
+        {% else %}
+            <span class="disabled">Next &#8594;</span>
+        {% endif %}
+    </div>
+</div>
+
+<div id="runs" class="tab-content">
+    <table>
+        <thead>
+            <tr><th>Run ID</th><th>Date</th><th>Status</th><th>Type</th><th>Items</th></tr>
+        </thead>
+        <tbody>
+            {% if runs %}
+                {% for r in runs %}
+                <tr>
+                    <td><a href="/debug/run/{{ r.run_id }}">{{ r.run_id[:8] }}...</a></td>
+                    <td>{{ r.day }}</td>
+                    <td class="{% if r.status == 'ok' %}status-ok{% else %}status-error{% endif %}">{{ r.status }}</td>
+                    <td>{{ r.run_type }}</td>
+                    <td>{{ r.received or 0 }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr><td colspan="5"><em>No runs yet</em></td></tr>
+            {% endif %}
+        </tbody>
+    </table>
+</div>
+
+<div id="debug" class="tab-content">
+    <div class="debug-links">
+        <a href="/debug/stats">Database Stats</a>
+        <a href="/docs">API Documentation</a>
+        <a href="/health">Health Check</a>
+    </div>
+</div>
+
+<script>
+    // Tab switching
+    document.querySelectorAll('.tab').forEach(tab => {
+        tab.addEventListener('click', () => {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+            tab.classList.add('active');
+            document.getElementById(tab.dataset.tab).classList.add('active');
+        });
+    });
+
+    // Star rating
+    document.querySelectorAll('.stars').forEach(container => {
+        const runId = container.dataset.runId;
+        if (!runId) return;
+
+        const stars = container.querySelectorAll('.star');
+
+        stars.forEach(star => {
+            star.addEventListener('mouseenter', () => {
+                const rating = parseInt(star.dataset.rating);
+                stars.forEach((s, i) => {
+                    s.textContent = i < rating ? '\u2605' : '\u2606';
+                });
+            });
+
+            star.addEventListener('mouseleave', () => {
+                const currentRating = parseInt(container.dataset.currentRating || 0);
+                stars.forEach((s, i) => {
+                    s.textContent = i < currentRating ? '\u2605' : '\u2606';
+                });
+            });
+
+            star.addEventListener('click', async () => {
+                const rating = parseInt(star.dataset.rating);
+                try {
+                    const resp = await fetch('/feedback/run', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ run_id: runId, rating: rating })
+                    });
+                    if (resp.ok) {
+                        container.dataset.currentRating = rating;
+                        stars.forEach((s, i) => {
+                            s.textContent = i < rating ? '\u2605' : '\u2606';
+                        });
+                    }
+                } catch (e) {
+                    console.error('Failed to save rating:', e);
+                }
+            });
+        });
+    });
+</script>
+{% endblock %}

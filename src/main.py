@@ -1,3 +1,7 @@
+# Load .env file BEFORE other imports (so env vars are available)
+from dotenv import load_dotenv
+load_dotenv()
+
 import json
 import uuid
 import html as html_lib
@@ -19,14 +23,16 @@ from src.db import get_conn, init_db
 from src.repo import (
     insert_news_items, start_run, finish_run_ok, finish_run_error,
     get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id,
-    get_run_failures_breakdown, get_run_artifacts, get_news_item_by_id,
-    get_news_items_by_date_with_ids, get_idempotency_response,
+    get_run_failures_with_sources, get_run_artifacts,
+    get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
+    get_run_feedback, get_item_feedback,
 )
 from src.normalize import normalize_and_dedupe
-from src.scoring import RankConfig, rank_items, score_item
+from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
 from src.explain import explain_item
+from src.views import build_ranked_display_items
 
 
 app = FastAPI()
@@ -50,9 +56,72 @@ def render_ui_error(request: Request, status: int, message: str) -> HTMLResponse
 </body></html>"""
     return HTMLResponse(content=content, status_code=status)
 
-@app.get("/")
-def root():
-    return{"service": "news-digest-engine", "try": ["/health", "/docs"]}
+@app.get("/", response_class=HTMLResponse)
+def root(request: Request, page: int = 1):
+    """Home page with tabbed navigation."""
+    per_page = 10
+    offset = (page - 1) * per_page
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        # Get total count of dates for pagination
+        total_dates = conn.execute(
+            "SELECT COUNT(DISTINCT substr(published_at, 1, 10)) FROM news_items"
+        ).fetchone()[0]
+
+        # Get dates with pagination
+        dates_rows = conn.execute(
+            "SELECT DISTINCT substr(published_at, 1, 10) as day FROM news_items ORDER BY day DESC LIMIT ? OFFSET ?",
+            (per_page, offset)
+        ).fetchall()
+        dates = [row[0] for row in dates_rows]
+
+        # Get run_id and saved rating for each date
+        date_runs = {}
+        date_ratings = {}
+        for d in dates:
+            run_row = conn.execute(
+                "SELECT run_id FROM runs WHERE substr(started_at, 1, 10) = ? ORDER BY started_at DESC LIMIT 1",
+                (d,)
+            ).fetchone()
+            run_id = run_row[0] if run_row else None
+            date_runs[d] = run_id
+            # Get saved rating
+            if run_id:
+                feedback = get_run_feedback(conn, run_id=run_id)
+                date_ratings[d] = feedback["rating"] if feedback else 0
+            else:
+                date_ratings[d] = 0
+
+        # Get recent runs
+        runs_rows = conn.execute(
+            "SELECT run_id, substr(started_at, 1, 10) as day, status, run_type, received, inserted FROM runs ORDER BY started_at DESC LIMIT 10"
+        ).fetchall()
+        runs = [{"run_id": r[0], "day": r[1], "status": r[2], "run_type": r[3], "received": r[4], "inserted": r[5]} for r in runs_rows]
+    finally:
+        conn.close()
+
+    # Pagination
+    total_pages = (total_dates + per_page - 1) // per_page if total_dates > 0 else 1
+    has_prev = page > 1
+    has_next = page < total_pages
+
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {
+            "dates": dates,
+            "date_runs": date_runs,
+            "date_ratings": date_ratings,
+            "runs": runs,
+            "page": page,
+            "total_pages": total_pages,
+            "has_prev": has_prev,
+            "has_next": has_next,
+        }
+    )
 
 @app.get("/health")
 def health(request: Request):
@@ -213,7 +282,7 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
 
     if top_n < 1:
         return render_ui_error(request, 400, "top_n must be >= 1")
-    
+
     now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
     cfg = RankConfig()
 
@@ -222,36 +291,20 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
         init_db(conn)
         items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
         run = get_run_by_day(conn, day=day)
+
+        if not items_with_ids:
+            return render_ui_error(request, 404, f"No items found for {day}.")
+
+        display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n)
     finally:
         conn.close()
-    
-    if not items_with_ids:
-        return render_ui_error(request, 404, f"No items found for {day}.")
 
-    #Rank pairs directly using score_item() avoids fragile object identify mapping
-    scored_pairs = []
-    for idx, (db_id, item) in enumerate(items_with_ids):
-        score = score_item(item, now=now, cfg=cfg)
-        scored_pairs.append((score, item.published_at, idx, db_id, item))
-
-    #sort name by same key as rank_items(): score desc, published_at desc, index asc
-    scored_pairs.sort(key=lambda t: (-t[0], -t[1].timestamp(), t[2]))
-
-    # Build display list with IDs and explanations
-    display_items = []
-    for score, _, _, db_id, item in scored_pairs[:top_n]:
-        expl = explain_item(item, now=now, cfg=cfg)
-        display_items.append({
-            "id": db_id,
-            "item": item,
-            "score": score,
-            "expl": expl,
-        })
+    run_id = run.get("run_id") if run else None
 
     return templates.TemplateResponse(
         request,
         "date.html",
-        {"day": day, "items": display_items, "count": len(display_items), "run": run}
+        {"day": day, "items": display_items, "count": len(display_items), "run": run, "run_id": run_id}
     )
 
 @app.get("/ui/item/{item_id}", response_class=HTMLResponse)
@@ -288,7 +341,7 @@ def debug_run(run_id: str, request: Request):
     try:
         init_db(conn)
         run = get_run_by_id(conn, run_id=run_id)
-        breakdown = get_run_failures_breakdown(conn, run_id=run_id)
+        failures_data = get_run_failures_with_sources(conn, run_id=run_id)
         artifact_paths = get_run_artifacts(conn, run_id=run_id)
     finally:
         conn.close()
@@ -306,6 +359,21 @@ def debug_run(run_id: str, request: Request):
         "duplicates": run.get("duplicates"),
     }
 
+    # Build LLM stats dict
+    cache_hits = run.get("llm_cache_hits", 0) or 0
+    cache_misses = run.get("llm_cache_misses", 0) or 0
+    total_calls = cache_hits + cache_misses
+    cache_hit_rate = round(cache_hits / total_calls * 100, 1) if total_calls > 0 else 0.0
+
+    llm_stats = {
+        "cache_hits": cache_hits,
+        "cache_misses": cache_misses,
+        "cache_hit_rate": cache_hit_rate,
+        "total_cost_usd": run.get("llm_total_cost_usd", 0.0) or 0.0,
+        "saved_cost_usd": run.get("llm_saved_cost_usd", 0.0) or 0.0,
+        "total_latency_ms": run.get("llm_total_latency_ms", 0) or 0,
+    }
+
     return {
         "run_id": run.get("run_id"),
         "run_type": run.get("run_type"),
@@ -313,7 +381,9 @@ def debug_run(run_id: str, request: Request):
         "started_at": run.get("started_at"),
         "finished_at": run.get("finished_at"),
         "counts": counts,
-        "failures_by_code": breakdown,
+        "llm_stats": llm_stats,
+        "failures_by_code": failures_data["by_code"],
+        "failed_sources": failures_data["failed_sources"],
         "artifact_paths": artifact_paths,
         "request_id": request_id,
     }
@@ -328,6 +398,70 @@ def debug_http_error():
 def debug_crash():
     raise RuntimeError("boom")
 
+
+@app.get("/debug/stats")
+def debug_stats(request: Request):
+    """Database stats for operational debugging - scoped to last 10 dates."""
+    import os
+    request_id = request.state.request_id
+    db_path = os.environ.get("NEWS_DB_PATH", "./data/news.db")
+
+    conn = get_conn()
+    try:
+        init_db(conn)
+
+        # Get last 10 dates with items
+        dates_with_items = conn.execute(
+            "SELECT DISTINCT substr(published_at, 1, 10) as day FROM news_items ORDER BY day DESC LIMIT 10"
+        ).fetchall()
+        dates_list = [row[0] for row in dates_with_items]
+
+        # Items count - only from last 10 dates
+        if dates_list:
+            placeholders = ",".join("?" * len(dates_list))
+            items_count = conn.execute(
+                f"SELECT COUNT(*) FROM news_items WHERE substr(published_at, 1, 10) IN ({placeholders})",
+                dates_list
+            ).fetchone()[0]
+        else:
+            items_count = 0
+
+        # Runs count - only from last 10 dates
+        if dates_list:
+            placeholders = ",".join("?" * len(dates_list))
+            runs_count = conn.execute(
+                f"SELECT COUNT(*) FROM runs WHERE substr(started_at, 1, 10) IN ({placeholders})",
+                dates_list
+            ).fetchone()[0]
+        else:
+            runs_count = 0
+
+        # Items per date breakdown
+        items_by_date = []
+        for day in dates_list:
+            count = conn.execute(
+                "SELECT COUNT(*) FROM news_items WHERE substr(published_at, 1, 10) = ?",
+                (day,)
+            ).fetchone()[0]
+            items_by_date.append({"date": day, "items": count})
+
+        # Recent runs (last 10)
+        recent_runs = conn.execute(
+            "SELECT run_id, substr(started_at, 1, 10) as day, status, run_type FROM runs ORDER BY started_at DESC LIMIT 10"
+        ).fetchall()
+        runs_list = [{"run_id": r[0], "day": r[1], "status": r[2], "run_type": r[3]} for r in recent_runs]
+
+    finally:
+        conn.close()
+
+    return {
+        "db_path": db_path,
+        "items_last_10_dates": items_count,
+        "runs_last_10_dates": runs_count,
+        "items_by_date": items_by_date,
+        "recent_runs": runs_list,
+        "request_id": request_id,
+    }
 
 
 @app.exception_handler(HTTPException)

@@ -33,10 +33,16 @@ def explain_item(item: NewsItem, *, now: datetime, cfg: RankConfig) -> dict:
     source_key = item.source.lower()
     source_weight = float(cfg.source_weights.get(source_key, 1.0))
 
+    # Calculate total score: (1.0 + relevance) × source_weight × recency_decay
+    relevance = len(matched_topics) + sum(kw["boost"] for kw in matched_keywords)
+    total_score = (1.0 + relevance) * source_weight * recency_decay
+
     return {
         "matched_topics": matched_topics,
         "matched_keywords": matched_keywords,
         "source_weight": source_weight,
         "age_hours": round(age_hours, 2),
-        "recency_decay": round(recency_decay,4),
+        "recency_decay": round(recency_decay, 4),
+        "relevance": round(relevance, 2),
+        "total_score": round(total_score, 4),
     }

@@ -92,14 +92,15 @@ def load_cases() -> list[EvalCase]:
         )
 
     # Group 5: Deliberately failing case (for debugging drill)
+    # Uncomment to simulate eval failure:
     # add(
     #     "keyword_mismatch_deliberate_fail",
     #     fx_keyword,
-    #     ["Company B quarterly results", "Company A announces merger talks"],  # WRONG order        
+    #     ["Company B quarterly results", "Company A announces merger talks"],  # WRONG order
     #     top_n=2,
     #     cfg=RankConfig(keyword_boosts={"merger": 5.0}, search_fields=["title"]),
     # )
 
     # Sanity: exactly 50
-    assert len(cases) == 50, f"expected 25 cases, got {len(cases)}"
+    assert len(cases) == 50, f"expected 50 cases, got {len(cases)}"
     return cases

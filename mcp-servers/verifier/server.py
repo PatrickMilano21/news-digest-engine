@@ -42,6 +42,15 @@ TOOLS = [
             "required": ["date"],
         },
     },
+    {
+        "name": "audit_error_handlers",
+        "description": "Audit src/main.py for ProblemDetails consistency: finds all HTTPException raises, exception handlers, and JSONResponse usages",
+        "inputSchema": {
+            "type": "object",
+            "properties": {},
+            "required": [],
+        },
+    },
 ]
 
 
@@ -182,10 +191,100 @@ def handle_ui_smoke(params):
 
 
 
+def handle_audit_error_handlers(params):
+    """Audit src/main.py for ProblemDetails consistency."""
+    main_py_path = r"C:\Users\pmilano\Desktop\dev\news-digest-engine\src\main.py"
+
+    try:
+        with open(main_py_path, "r", encoding="utf-8") as f:
+            content = f.read()
+            lines = content.split("\n")
+    except Exception as e:
+        return {"ok": False, "error": f"Could not read {main_py_path}: {e}"}
+
+    # Find all raise HTTPException
+    http_exceptions = []
+    for i, line in enumerate(lines, 1):
+        if "raise HTTPException" in line:
+            # Extract status code and detail
+            match = re.search(r'status_code=(\d+).*detail="([^"]*)"', line)
+            if match:
+                http_exceptions.append({
+                    "line": i,
+                    "status": int(match.group(1)),
+                    "detail": match.group(2),
+                })
+            else:
+                http_exceptions.append({"line": i, "raw": line.strip()})
+
+    # Find exception handlers
+    exception_handlers = []
+    for i, line in enumerate(lines, 1):
+        if "@app.exception_handler" in line:
+            # Get the exception type from the decorator
+            match = re.search(r'@app\.exception_handler\((\w+)\)', line)
+            exc_type = match.group(1) if match else "unknown"
+            exception_handlers.append({"line": i, "exception_type": exc_type})
+
+    # Find JSONResponse usages
+    json_responses = []
+    for i, line in enumerate(lines, 1):
+        if "JSONResponse(" in line:
+            # Extract status code if present
+            match = re.search(r'status_code=(\d+)', line)
+            status = int(match.group(1)) if match else None
+            json_responses.append({"line": i, "status_code": status})
+
+    # Check for issues
+    issues = []
+
+    # Issue: JSONResponse with 4xx/5xx not in exception handler context
+    # (simplified check: just flag any 4xx/5xx JSONResponse for review)
+    for jr in json_responses:
+        if jr["status_code"] and jr["status_code"] >= 400:
+            # Check if it's in a handler (within 50 lines after @app.exception_handler)
+            # Using "after" because handler functions follow their decorators
+            is_in_handler = any(
+                0 < (jr["line"] - eh["line"]) < 50
+                for eh in exception_handlers
+            )
+            if not is_in_handler:
+                issues.append({
+                    "type": "error_response_outside_handler",
+                    "line": jr["line"],
+                    "status_code": jr["status_code"],
+                })
+
+    # Check for expected handlers
+    expected_handlers = {"HTTPException", "Exception", "RequestValidationError"}
+    found_handlers = {eh["exception_type"] for eh in exception_handlers}
+    missing_handlers = expected_handlers - found_handlers
+    if missing_handlers:
+        issues.append({
+            "type": "missing_handler",
+            "missing": list(missing_handlers),
+        })
+
+    return {
+        "ok": len(issues) == 0,
+        "http_exceptions": http_exceptions,
+        "exception_handlers": exception_handlers,
+        "json_responses": json_responses,
+        "issues": issues,
+        "summary": {
+            "total_http_exceptions": len(http_exceptions),
+            "total_exception_handlers": len(exception_handlers),
+            "total_json_responses": len(json_responses),
+            "total_issues": len(issues),
+        },
+    }
+
+
 TOOL_HANDLERS = {
     "run_tests": handle_run_tests,
     "get_run": handle_get_run,
     "ui_smoke": handle_ui_smoke,
+    "audit_error_handlers": handle_audit_error_handlers,
 }
 
 

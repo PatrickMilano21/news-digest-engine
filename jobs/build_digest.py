@@ -12,6 +12,7 @@ from src.repo import (
     insert_run_artifact,
     get_cached_summary,
     insert_cached_summary,
+    update_run_llm_stats,
 )
 from src.scoring import RankConfig, rank_items
 from src.explain import explain_item
@@ -48,12 +49,13 @@ def main(argv: list[str] | None = None) -> int:
 
         # Initialize run-level stats
         llm_stats = {
-        "cache_hits": 0,
-        "cache_misses": 0,
-        "total_prompt_tokens": 0,
-        "total_completion_tokens": 0,
-        "total_cost_usd": 0.0,
-        "saved_cost_usd": 0.0,
+            "cache_hits": 0,
+            "cache_misses": 0,
+            "total_prompt_tokens": 0,
+            "total_completion_tokens": 0,
+            "total_cost_usd": 0.0,
+            "saved_cost_usd": 0.0,
+            "total_latency_ms": 0,
         }
         # Summarize each item and validate grounding
         summaries = []
@@ -97,10 +99,24 @@ def main(argv: list[str] | None = None) -> int:
                 llm_stats["total_prompt_tokens"] += usage["prompt_tokens"]
                 llm_stats["total_completion_tokens"] += usage["completion_tokens"]
                 llm_stats["total_cost_usd"] += usage["cost_usd"]
+                llm_stats["total_latency_ms"] += usage["latency_ms"]
             
             summaries.append(result)
 
         log_event("run_llm_stats", **llm_stats)
+
+        # Persist LLM stats to run record (Day 20)
+        if run:
+            update_run_llm_stats(
+                conn,
+                run["run_id"],
+                cache_hits=llm_stats["cache_hits"],
+                cache_misses=llm_stats["cache_misses"],
+                total_cost_usd=llm_stats["total_cost_usd"],
+                saved_cost_usd=llm_stats["saved_cost_usd"],
+                total_latency_ms=llm_stats["total_latency_ms"],
+            )
+
         html_text = render_digest_html(day=day, run=run, ranked_items=ranked, explanations=explanations, summaries=summaries, cfg=cfg, now=now, top_n=top_n)    
     
     finally:

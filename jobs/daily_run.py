@@ -49,6 +49,7 @@ from src.repo import (
     get_cached_summary,
     insert_cached_summary,
     insert_run_artifact,
+    update_run_llm_stats,
 )
 
 TOP_N = 10  # Number of items to rank and summarize
@@ -374,6 +375,17 @@ def main() -> int:
         finished_at = datetime.combine(
             run_day, datetime.now(timezone.utc).time(), tzinfo=timezone.utc
         ).isoformat()
+
+        # Persist LLM stats to run record
+        update_run_llm_stats(
+            conn,
+            run_id=run_id,
+            cache_hits=llm_stats["cache_hits"],
+            cache_misses=llm_stats["cache_misses"],
+            total_cost_usd=llm_stats["total_cost_usd"],
+            saved_cost_usd=llm_stats["saved_cost_usd"],
+            total_latency_ms=llm_stats.get("total_latency_ms", 0),
+        )
 
         finish_run_ok(
             conn,

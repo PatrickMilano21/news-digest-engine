@@ -202,8 +202,8 @@ def test_pipeline_completes_even_if_digest_fails(monkeypatch, sample_items, vali
     assert result == 0, "Pipeline should complete even when digest writing fails"
 
 
-def test_daily_run_creates_eval_report_artifact(tmp_path, monkeypatch):
-    """Daily run creates eval_report artifact in run_artifacts table."""
+def test_daily_run_creates_both_artifacts(tmp_path, monkeypatch):
+    """Daily run creates both digest and eval_report artifacts in run_artifacts table."""
     db_path = tmp_path / "test.db"
     monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
     monkeypatch.setattr(sys, "argv", ["daily_run.py", "--date", "2026-01-24", "--mode", "fixtures", "--force"])
@@ -215,7 +215,8 @@ def test_daily_run_creates_eval_report_artifact(tmp_path, monkeypatch):
         row = conn.execute("SELECT run_id FROM runs ORDER BY started_at DESC LIMIT 1").fetchone()
         assert row is not None, "No run was created"
         artifacts = get_run_artifacts(conn, run_id=row[0])
-        assert "eval_report" in artifacts
+        assert "digest" in artifacts, f"Missing digest artifact. Got: {list(artifacts.keys())}"
+        assert "eval_report" in artifacts, f"Missing eval_report artifact. Got: {list(artifacts.keys())}"
     finally:
         conn.close()
 

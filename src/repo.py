@@ -165,10 +165,13 @@ def get_news_items_by_date(conn: sqlite3.Connection, *, day: str) -> list[NewsIt
     return out
 
 
-def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
+def get_run_by_day(conn: sqlite3.Connection, *, day: str, run_type: str = "ingest") -> dict | None:
     """
-    Read-only. Return the most recent ingest run for a given YYYY-MM-DD day.
-    Filters to run_type='ingest' only.
+    Read-only. Return the most recent run for a given YYYY-MM-DD day.
+
+    Args:
+        day: Date string in YYYY-MM-DD format
+        run_type: Filter by run type ('ingest', 'eval'). Default 'ingest'.
     """
     row = conn.execute(
         """
@@ -177,11 +180,11 @@ def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
                error_type, error_message, run_type
         FROM runs
         WHERE substr(started_at, 1, 10) = ?
-          AND run_type = 'ingest'
+          AND run_type = ?
         ORDER BY started_at DESC
         LIMIT 1;
         """,
-        (day,),
+        (day, run_type),
     ).fetchone()
 
     if row is None:
@@ -202,79 +205,7 @@ def get_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
     }
 
 
-def get_eval_run_by_day(conn: sqlite3.Connection, *, day: str) -> dict | None:
-    """
-    Read-only. Return the most recent eval run for a given YYYY-MM-DD day.
-    Filters to run_type='eval' only.
-    """
-    row = conn.execute(
-        """
-        SELECT run_id, started_at, finished_at, status,
-               received, after_dedupe, inserted, duplicates,
-               error_type, error_message, run_type
-        FROM runs
-        WHERE substr(started_at, 1, 10) = ?
-          AND run_type = 'eval'
-        ORDER BY started_at DESC
-        LIMIT 1;
-        """,
-        (day,),
-    ).fetchone()
-
-    if row is None:
-        return None
-
-    return {
-        "run_id": row[0],
-        "started_at": row[1],
-        "finished_at": row[2],
-        "status": row[3],
-        "received": row[4],
-        "after_dedupe": row[5],
-        "inserted": row[6],
-        "duplicates": row[7],
-        "error_type": row[8],
-        "error_message": row[9],
-        "run_type": row[10],
-    }
-
-
-def list_runs_by_day(conn: sqlite3.Connection, *, day: str) -> list[dict]:
-    """
-    Read-only. Return all runs for a given YYYY-MM-DD day (any run_type).
-    For debug tooling.
-    """
-    rows = conn.execute(
-        """
-        SELECT run_id, started_at, finished_at, status,
-               received, after_dedupe, inserted, duplicates,
-               error_type, error_message, run_type
-        FROM runs
-        WHERE substr(started_at, 1, 10) = ?
-        ORDER BY started_at DESC;
-        """,
-        (day,),
-    ).fetchall()
-
-    out = []
-    for row in rows:
-        out.append({
-            "run_id": row[0],
-            "started_at": row[1],
-            "finished_at": row[2],
-            "status": row[3],
-            "received": row[4],
-            "after_dedupe": row[5],
-            "inserted": row[6],
-            "duplicates": row[7],
-            "error_type": row[8],
-            "error_message": row[9],
-            "run_type": row[10],
-        })
-    return out
-
-
-def has_successful_run_for_day(conn, *, day: str) -> bool:
+def has_successful_run_for_day(conn: sqlite3.Connection, *, day: str) -> bool:
     row = conn.execute(
         """
         SELECT 1
@@ -289,7 +220,7 @@ def has_successful_run_for_day(conn, *, day: str) -> bool:
     return row is not None
 
 
-def get_run_by_id(conn, *, run_id: str) -> dict | None:
+def get_run_by_id(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
     row = conn.execute(
         """
         SELECT run_id, started_at, finished_at, status,
@@ -389,7 +320,7 @@ def upsert_run_failures(
     conn.commit()
 
 
-def get_run_failures_with_sources(conn, *, run_id: str) -> dict:
+def get_run_failures_with_sources(conn: sqlite3.Connection, *, run_id: str) -> dict:
     """Get failure counts AND which sources failed.
 
     Returns:
@@ -502,7 +433,7 @@ NewsItem]]:
     return out
 
 
-def write_audit_log(conn, *, event_type: str, ts: datetime | str, run_id: str | None = None, day: str | None = None, details: dict | None = None) -> None:
+def write_audit_log(conn: sqlite3.Connection, *, event_type: str, ts: datetime | str, run_id: str | None = None, day: str | None = None, details: dict | None = None) -> None:
     """Write an audit log entry. never raises - failures are swallowed."""
     try:
         ts_str = ts.isoformat() if isinstance(ts, datetime) else ts
@@ -517,7 +448,7 @@ def write_audit_log(conn, *, event_type: str, ts: datetime | str, run_id: str | 
     except:
         pass # swallow errors
 
-def get_audit_logs(conn, *, limit: int = 100) -> list[dict]:
+def get_audit_logs(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict]:
     """Fetch recent audit logs for debugging."""
     rows = conn.execute(
         "SELECT id, ts, event_type, run_id, day, details_json FROM audit_logs ORDER BY id DESC LIMIT ?",   
@@ -536,7 +467,7 @@ def get_audit_logs(conn, *, limit: int = 100) -> list[dict]:
     ]
 
 
-def report_top_sources(conn, *, end_day: str, days: int = 7, limit: int = 10) -> list[dict]:
+def report_top_sources(conn: sqlite3.Connection, *, end_day: str, days: int = 7, limit: int = 10) -> list[dict]:
     """Get top sources by item count over the last N days."""
     end_date = datetime.strptime(end_day, "%Y-%m-%d").date()
     start_date = end_date - timedelta(days=days - 1)
@@ -557,7 +488,7 @@ def report_top_sources(conn, *, end_day: str, days: int = 7, limit: int = 10) ->
     return [{"source": row[0], "count": row[1]} for row in rows]
 
 
-def report_failures_by_code(conn, *, end_day: str, days: int = 7) -> dict[str, int]:
+def report_failures_by_code(conn: sqlite3.Connection, *, end_day: str, days: int = 7) -> dict[str, int]:
     """Get run failure counts by error_type over the last N days."""
     end_date = datetime.strptime(end_day, "%Y-%m-%d").date()
     start_date = end_date - timedelta(days=days - 1)
@@ -578,14 +509,16 @@ def report_failures_by_code(conn, *, end_day: str, days: int = 7) -> dict[str, i
     return {row[0]: row[1] for row in rows}
 
 
-def get_cached_summary(conn, *, cache_key: str) -> dict | None:
+def get_cached_summary(conn: sqlite3.Connection, *, cache_key: str) -> dict | None:
     """
-    Look up a cahced LLM summary by cache key.
-    Args: 
-        Conn: database conneciton
+    Look up a cached LLM summary by cache key.
+
+    Args:
+        conn: database connection
         cache_key: SHA-256 hash of (model|evidence)
-    Returns: 
-        dict with all chace columns if found, None if not found
+
+    Returns:
+        dict with all cache columns if found, None if not found
     """
     cur = conn.execute(
         """
@@ -609,7 +542,7 @@ def get_cached_summary(conn, *, cache_key: str) -> dict | None:
         "created_at": row[7],
     }
 
-def insert_cached_summary(conn, *, cache_key: str, model_name: str, summary_json: str,
+def insert_cached_summary(conn: sqlite3.Connection, *, cache_key: str, model_name: str, summary_json: str,
     prompt_tokens: int, completion_tokens: int, cost_usd: float, latency_ms: int, created_at: str) -> None:
     """
     Store a summary in the cache.
@@ -639,7 +572,7 @@ def insert_cached_summary(conn, *, cache_key: str, model_name: str, summary_json
     )
     conn.commit()
 
-def get_idempotency_response(conn, *, key: str) -> dict | None:
+def get_idempotency_response(conn: sqlite3.Connection, *, key: str) -> dict | None:
     """Return cached response if idempotency key exists, else None."""
     cur = conn.execute(
         "SELECT key, endpoint, response_json, created_at FROM idempotency_keys WHERE key = ?",
@@ -655,7 +588,7 @@ def get_idempotency_response(conn, *, key: str) -> dict | None:
         "created_at": row[3]
     }
 
-def store_idempotency_response(conn, *, key: str, endpoint: str,
+def store_idempotency_response(conn: sqlite3.Connection, *, key: str, endpoint: str,
                                response_json: str, created_at: str) -> None:
     """Store response for idempotency key. INSERT OR IGNORE for safety."""
     conn.execute(
@@ -666,7 +599,7 @@ def store_idempotency_response(conn, *, key: str, endpoint: str,
     conn.commit()
 
 
-def upsert_run_feedback(conn, *, run_id: str, rating: int, comment: str | None,
+def upsert_run_feedback(conn: sqlite3.Connection, *, run_id: str, rating: int, comment: str | None,
                         created_at: str, updated_at: str) -> int:
     """
     Insert or update feedback for a run (overall digest rating).
@@ -695,7 +628,7 @@ def upsert_run_feedback(conn, *, run_id: str, rating: int, comment: str | None,
 
 
 
-def upsert_item_feedback(conn, *, run_id: str, item_url: str, useful: int,
+def upsert_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str, useful: int,
                          created_at: str, updated_at: str) -> int:
     """
     Insert or update feedback for a specific item in a run.
@@ -723,7 +656,92 @@ def upsert_item_feedback(conn, *, run_id: str, item_url: str, useful: int,
     return row[0]
 
 
-def get_run_feedback(conn, *, run_id: str) -> dict | None:
+def get_distinct_dates(conn: sqlite3.Connection, *, limit: int | None = None, offset: int = 0) -> list[str]:
+    """Get distinct dates that have news items, ordered descending.
+
+    Args:
+        limit: Max dates to return (None = all)
+        offset: Skip first N dates (for pagination)
+
+    Returns:
+        List of YYYY-MM-DD strings
+    """
+    if limit is not None:
+        rows = conn.execute(
+            "SELECT DISTINCT substr(published_at, 1, 10) as day FROM news_items ORDER BY day DESC LIMIT ? OFFSET ?",
+            (limit, offset)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            "SELECT DISTINCT substr(published_at, 1, 10) as day FROM news_items ORDER BY day DESC"
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
+def count_distinct_dates(conn: sqlite3.Connection) -> int:
+    """Count total distinct dates with news items."""
+    return conn.execute(
+        "SELECT COUNT(DISTINCT substr(published_at, 1, 10)) FROM news_items"
+    ).fetchone()[0]
+
+
+def count_items_for_dates(conn: sqlite3.Connection, *, dates: list[str]) -> int:
+    """Count total news items for a list of dates."""
+    if not dates:
+        return 0
+    placeholders = ",".join("?" * len(dates))
+    return conn.execute(
+        f"SELECT COUNT(*) FROM news_items WHERE substr(published_at, 1, 10) IN ({placeholders})",
+        dates
+    ).fetchone()[0]
+
+
+def count_runs_for_dates(conn: sqlite3.Connection, *, dates: list[str]) -> int:
+    """Count total runs for a list of dates."""
+    if not dates:
+        return 0
+    placeholders = ",".join("?" * len(dates))
+    return conn.execute(
+        f"SELECT COUNT(*) FROM runs WHERE substr(started_at, 1, 10) IN ({placeholders})",
+        dates
+    ).fetchone()[0]
+
+
+def get_items_count_by_date(conn: sqlite3.Connection, *, dates: list[str]) -> list[dict]:
+    """Get item count breakdown for each date.
+
+    Returns:
+        [{"date": "2026-01-25", "items": 150}, ...]
+    """
+    result = []
+    for day in dates:
+        count = conn.execute(
+            "SELECT COUNT(*) FROM news_items WHERE substr(published_at, 1, 10) = ?",
+            (day,)
+        ).fetchone()[0]
+        result.append({"date": day, "items": count})
+    return result
+
+
+def get_recent_runs_summary(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict]:
+    """Get recent runs with basic info for display.
+
+    Returns:
+        [{"run_id": "...", "day": "2026-01-25", "status": "ok",
+          "run_type": "ingest", "received": 150, "inserted": 140}, ...]
+    """
+    rows = conn.execute(
+        """SELECT run_id, substr(started_at, 1, 10) as day, status, run_type, received, inserted
+           FROM runs ORDER BY started_at DESC LIMIT ?""",
+        (limit,)
+    ).fetchall()
+    return [
+        {"run_id": r[0], "day": r[1], "status": r[2], "run_type": r[3], "received": r[4], "inserted": r[5]}
+        for r in rows
+    ]
+
+
+def get_run_feedback(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
     """Get feedback for a run, if it exists."""
     cur = conn.execute(
         """SELECT feedback_id, run_id, rating, comment, created_at, updated_at
@@ -743,7 +761,7 @@ def get_run_feedback(conn, *, run_id: str) -> dict | None:
     }
 
 
-def get_item_feedback(conn, *, run_id: str, item_url: str) -> dict | None:
+def get_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str) -> dict | None:
     """Get feedback for a specific item in a run, if it exists."""
     cur = conn.execute(
         """SELECT feedback_id, run_id, item_url, useful, created_at, updated_at

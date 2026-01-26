@@ -7,7 +7,7 @@ from src.repo import (
     insert_news_items, start_run, finish_run_ok, finish_run_error,
     get_latest_run, upsert_run_failures,
     get_run_failures_with_sources, insert_run_artifact, get_run_artifacts,
-    get_run_by_day, get_eval_run_by_day, report_top_sources,
+    get_run_by_day, report_top_sources,
     report_failures_by_code, update_run_llm_stats, get_run_by_id,
 )
 from src.schemas import NewsItem
@@ -221,7 +221,8 @@ def test_get_run_by_day_returns_ingest_only(tmp_path, monkeypatch):
         conn.close()
 
 
-def test_get_eval_run_by_day_returns_eval_only(tmp_path, monkeypatch):
+def test_get_run_by_day_with_run_type_eval(tmp_path, monkeypatch):
+    """Test that get_run_by_day can filter by run_type='eval'."""
     db_file = tmp_path / "test.db"
     monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
 
@@ -232,7 +233,7 @@ def test_get_eval_run_by_day_returns_eval_only(tmp_path, monkeypatch):
         start_run(conn, "ingest_run", "2026-01-15T00:00:00+00:00", received=10)
         start_run(conn, "eval_run", "2026-01-15T01:00:00+00:00", received=0, run_type="eval")
 
-        result = get_eval_run_by_day(conn, day="2026-01-15")
+        result = get_run_by_day(conn, day="2026-01-15", run_type="eval")
 
         assert result is not None
         assert result["run_id"] == "eval_run"

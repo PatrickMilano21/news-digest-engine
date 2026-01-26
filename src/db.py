@@ -3,12 +3,31 @@ from __future__ import annotations
 
 import os
 import sqlite3
+from contextlib import contextmanager
 from pathlib import Path
 
 
 class InvalidDbPathError(Exception):
     """Raised when NEWS_DB_PATH points to an invalid location."""
     pass
+
+
+@contextmanager
+def db_conn():
+    """
+    Context manager for database connections.
+    Opens connection, initializes schema, yields connection, closes on exit.
+
+    Usage:
+        with db_conn() as conn:
+            # use conn
+    """
+    conn = get_conn()
+    try:
+        init_db(conn)
+        yield conn
+    finally:
+        conn.close()
 
 
 def get_conn() -> sqlite3.Connection:

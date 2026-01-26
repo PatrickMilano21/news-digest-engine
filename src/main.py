@@ -4,7 +4,6 @@ load_dotenv()
 
 import json
 import uuid
-import html as html_lib
 
 from datetime import datetime, timezone, date
 
@@ -19,20 +18,19 @@ from src.logging_utils import log_event
 from src.errors import problem
 
 from src.schemas import IngestRequest, RunFeedbackRequest, ItemFeedbackRequest
-from src.db import get_conn, init_db
+from src.db import db_conn, get_conn, init_db
 from src.repo import (
     insert_news_items, start_run, finish_run_ok, finish_run_error,
     get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id,
     get_run_failures_with_sources, get_run_artifacts,
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
-    get_run_feedback, get_item_feedback,
 )
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
 from src.explain import explain_item
-from src.views import build_ranked_display_items
+from src.views import build_ranked_display_items, build_homepage_data, build_debug_stats
 
 
 app = FastAPI()
@@ -46,80 +44,26 @@ app.middleware("http")(request_id_middleware)
 
 def render_ui_error(request: Request, status: int, message: str) -> HTMLResponse:
     """Return HTML error for UI routes (not JSON)."""
-    safe_msg = html_lib.escape(message)
-    content = f"""<!DOCTYPE html>
-<html><head><title>Error {status}</title></head>
-<body style="font-family: sans-serif; margin: 24px;">
-<h1>Error {status}</h1>
-<p>{safe_msg}</p>
-<p><a href="/">← Home</a></p>
-</body></html>"""
-    return HTMLResponse(content=content, status_code=status)
+    return templates.TemplateResponse(
+        request,
+        "error.html",
+        {"status": status, "message": message},
+        status_code=status
+    )
 
 @app.get("/", response_class=HTMLResponse)
 def root(request: Request, page: int = 1):
     """Home page with tabbed navigation."""
-    per_page = 10
-    offset = (page - 1) * per_page
-
-    conn = get_conn()
-    try:
-        init_db(conn)
-
-        # Get total count of dates for pagination
-        total_dates = conn.execute(
-            "SELECT COUNT(DISTINCT substr(published_at, 1, 10)) FROM news_items"
-        ).fetchone()[0]
-
-        # Get dates with pagination
-        dates_rows = conn.execute(
-            "SELECT DISTINCT substr(published_at, 1, 10) as day FROM news_items ORDER BY day DESC LIMIT ? OFFSET ?",
-            (per_page, offset)
-        ).fetchall()
-        dates = [row[0] for row in dates_rows]
-
-        # Get run_id and saved rating for each date
-        date_runs = {}
-        date_ratings = {}
-        for d in dates:
-            run_row = conn.execute(
-                "SELECT run_id FROM runs WHERE substr(started_at, 1, 10) = ? ORDER BY started_at DESC LIMIT 1",
-                (d,)
-            ).fetchone()
-            run_id = run_row[0] if run_row else None
-            date_runs[d] = run_id
-            # Get saved rating
-            if run_id:
-                feedback = get_run_feedback(conn, run_id=run_id)
-                date_ratings[d] = feedback["rating"] if feedback else 0
-            else:
-                date_ratings[d] = 0
-
-        # Get recent runs
-        runs_rows = conn.execute(
-            "SELECT run_id, substr(started_at, 1, 10) as day, status, run_type, received, inserted FROM runs ORDER BY started_at DESC LIMIT 10"
-        ).fetchall()
-        runs = [{"run_id": r[0], "day": r[1], "status": r[2], "run_type": r[3], "received": r[4], "inserted": r[5]} for r in runs_rows]
-    finally:
-        conn.close()
-
-    # Pagination
-    total_pages = (total_dates + per_page - 1) // per_page if total_dates > 0 else 1
-    has_prev = page > 1
-    has_next = page < total_pages
+    with db_conn() as conn:
+        data = build_homepage_data(conn, page=page, per_page=10)
 
     return templates.TemplateResponse(
         request,
         "home.html",
         {
-            "dates": dates,
-            "date_runs": date_runs,
-            "date_ratings": date_ratings,
-            "runs": runs,
-            "page": page,
-            "total_pages": total_pages,
-            "has_prev": has_prev,
-            "has_next": has_next,
+            "dates": data["dates"],
+            "runs": data["runs"],
+            "pagination": data["pagination"],
         }
     )
 
@@ -162,7 +106,7 @@ def ingest_raw(payload: IngestRequest, request: Request):
         finish_run_ok(conn, run_id, finished_at, after_dedupe=after_dedupe, inserted=inserted, duplicates=duplicates,)
 
     except Exception as exc:
-        finished_at = datetime.now(timezone.utc).isoformat
+        finished_at = datetime.now(timezone.utc).isoformat()
         try:
             finish_run_error(conn, run_id, finished_at, error_type=type(exc).__name__, error_message=str(exc))
 
@@ -183,12 +127,8 @@ def ingest_raw(payload: IngestRequest, request: Request):
 
 @app.get("/runs/latest")
 def latest_run():
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         latest = get_latest_run(conn)
-    finally:
-        conn.close()
 
     if latest is None:
         raise HTTPException(status_code=404, detail="No runs found")
@@ -208,14 +148,9 @@ def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
 
     now = datetime.fromisoformat(f"{date_str}T23:59:59+00:00")
 
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         items = get_news_items_by_date(conn, day=date_str)
 
-    finally:
-        conn.close()
-    
     ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
     return {
         "date": date_str,
@@ -241,36 +176,30 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
     now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
 
     # 2) DB reads
-    conn = get_conn()
-    try:
-        init_db(conn)
-
+    with db_conn() as conn:
         run = get_run_by_day(conn, day=day)
         items = get_news_items_by_date(conn, day=day)
 
-        # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
-        if run is None and not items:
-            raise HTTPException(status_code=404, detail="No data found for this day")
+    # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
+    if run is None and not items:
+        raise HTTPException(status_code=404, detail="No data found for this day")
 
-        # 3) rank + explain (use default config for now)
-        cfg = RankConfig()
-        ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
-        explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
+    # 3) rank + explain (use default config for now)
+    cfg = RankConfig()
+    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+    explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
 
-        # 4) render
-        html_text = render_digest_html(
-            day=day,
-            run=run,
-            ranked_items=ranked,
-            explanations=explanations,
-            cfg=cfg,
-            now=now,
-            top_n=top_n,
-        )
-        return HTMLResponse(content=html_text, status_code=200)
-
-    finally:
-        conn.close()
+    # 4) render
+    html_text = render_digest_html(
+        day=day,
+        run=run,
+        ranked_items=ranked,
+        explanations=explanations,
+        cfg=cfg,
+        now=now,
+        top_n=top_n,
+    )
+    return HTMLResponse(content=html_text, status_code=200)
 
 @app.get("/ui/date/{date_str}", response_class=HTMLResponse)
 def ui_date(request: Request, date_str: str, top_n: int = 10):
@@ -286,9 +215,7 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
     now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
     cfg = RankConfig()
 
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
         run = get_run_by_day(conn, day=day)
 
@@ -296,8 +223,6 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
             return render_ui_error(request, 404, f"No items found for {day}.")
 
         display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n)
-    finally:
-        conn.close()
 
     run_id = run.get("run_id") if run else None
 
@@ -312,12 +237,8 @@ def ui_item(request: Request, item_id: int):
     if item_id < 1:
         return render_ui_error(request, 400, "item_id must be >= 1")
 
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         result = get_news_item_by_id(conn, item_id=item_id)
-    finally:
-        conn.close()
 
     if result is None:
         return render_ui_error(request, 404, f"Item {item_id} not found.")
@@ -337,14 +258,10 @@ def ui_item(request: Request, item_id: int):
 def debug_run(run_id: str, request: Request):
     request_id = request.state.request_id
 
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         run = get_run_by_id(conn, run_id=run_id)
         failures_data = get_run_failures_with_sources(conn, run_id=run_id)
         artifact_paths = get_run_artifacts(conn, run_id=run_id)
-    finally:
-        conn.close()
 
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -406,60 +323,15 @@ def debug_stats(request: Request):
     request_id = request.state.request_id
     db_path = os.environ.get("NEWS_DB_PATH", "./data/news.db")
 
-    conn = get_conn()
-    try:
-        init_db(conn)
-
-        # Get last 10 dates with items
-        dates_with_items = conn.execute(
-            "SELECT DISTINCT substr(published_at, 1, 10) as day FROM news_items ORDER BY day DESC LIMIT 10"
-        ).fetchall()
-        dates_list = [row[0] for row in dates_with_items]
-
-        # Items count - only from last 10 dates
-        if dates_list:
-            placeholders = ",".join("?" * len(dates_list))
-            items_count = conn.execute(
-                f"SELECT COUNT(*) FROM news_items WHERE substr(published_at, 1, 10) IN ({placeholders})",
-                dates_list
-            ).fetchone()[0]
-        else:
-            items_count = 0
-
-        # Runs count - only from last 10 dates
-        if dates_list:
-            placeholders = ",".join("?" * len(dates_list))
-            runs_count = conn.execute(
-                f"SELECT COUNT(*) FROM runs WHERE substr(started_at, 1, 10) IN ({placeholders})",
-                dates_list
-            ).fetchone()[0]
-        else:
-            runs_count = 0
-
-        # Items per date breakdown
-        items_by_date = []
-        for day in dates_list:
-            count = conn.execute(
-                "SELECT COUNT(*) FROM news_items WHERE substr(published_at, 1, 10) = ?",
-                (day,)
-            ).fetchone()[0]
-            items_by_date.append({"date": day, "items": count})
-
-        # Recent runs (last 10)
-        recent_runs = conn.execute(
-            "SELECT run_id, substr(started_at, 1, 10) as day, status, run_type FROM runs ORDER BY started_at DESC LIMIT 10"
-        ).fetchall()
-        runs_list = [{"run_id": r[0], "day": r[1], "status": r[2], "run_type": r[3]} for r in recent_runs]
-
-    finally:
-        conn.close()
+    with db_conn() as conn:
+        stats = build_debug_stats(conn, date_limit=10)
 
     return {
         "db_path": db_path,
-        "items_last_10_dates": items_count,
-        "runs_last_10_dates": runs_count,
-        "items_by_date": items_by_date,
-        "recent_runs": runs_list,
+        "items_last_10_dates": stats["items_count"],
+        "runs_last_10_dates": stats["runs_count"],
+        "items_by_date": stats["items_by_date"],
+        "recent_runs": stats["recent_runs"],
         "request_id": request_id,
     }
 
@@ -510,10 +382,7 @@ async def submit_run_feedback(
     Supports idempotency: Include X-Idempotency-Key header for safe retries.
     """
     request_id = request.state.request_id
-    conn = get_conn()
-    try:
-        init_db(conn)
-
+    with db_conn() as conn:
         # 1. Check idempotency key FIRST (prevents double-click duplicates)
         if idempotency_key:
             cached = get_idempotency_response(conn, key=idempotency_key)
@@ -569,8 +438,6 @@ async def submit_run_feedback(
             content=response_data,
             headers={"X-Request-ID": request_id}
         )
-    finally:
-        conn.close()
 
 
 @app.post("/feedback/item")
@@ -585,10 +452,7 @@ async def submit_item_feedback(
     Supports idempotency: Include X-Idempotency-Key header for safe retries.
     """
     request_id = request.state.request_id
-    conn = get_conn()
-    try:
-        init_db(conn)
-
+    with db_conn() as conn:
         # Check idempotency key
         if idempotency_key:
             cached = get_idempotency_response(conn, key=idempotency_key)
@@ -647,8 +511,6 @@ async def submit_item_feedback(
             content=response_data,
             headers={"X-Request-ID": request_id}
         )
-    finally:
-        conn.close()
 
 
 

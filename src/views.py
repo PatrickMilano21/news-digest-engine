@@ -13,7 +13,17 @@ from src.scoring import RankConfig, score_item
 from src.explain import explain_item
 from src.cache_utils import compute_cache_key
 from src.clients.llm_openai import MODEL
-from src.repo import get_cached_summary
+from src.repo import (
+    get_cached_summary,
+    get_distinct_dates,
+    count_distinct_dates,
+    get_run_by_day,
+    get_run_feedback,
+    get_recent_runs_summary,
+    count_items_for_dates,
+    count_runs_for_dates,
+    get_items_count_by_date,
+)
 from src.llm_schemas.summary import SummaryResult
 from src.schemas import NewsItem
 
@@ -80,3 +90,86 @@ def _fetch_cached_summary(conn, item: NewsItem) -> SummaryResult | None:
         return SummaryResult(**json.loads(cached["summary_json"]))
     except Exception:
         return None
+
+
+def build_homepage_data(conn, *, page: int = 1, per_page: int = 10) -> dict:
+    """Build data for the homepage view.
+
+    Composes repo primitives to build the homepage display model.
+
+    Returns:
+        {
+            "dates": [{"day": "2026-01-25", "run_id": "abc", "rating": 4}, ...],
+            "runs": [{"run_id": "...", "day": "...", "status": "ok", ...}, ...],
+            "pagination": {"page": 1, "per_page": 10, "total": 45, "total_pages": 5,
+                           "has_prev": False, "has_next": True}
+        }
+    """
+    # Get total and paginated dates
+    total = count_distinct_dates(conn)
+    offset = (page - 1) * per_page
+    dates = get_distinct_dates(conn, limit=per_page, offset=offset)
+
+    # Enrich each date with run_id and rating
+    dates_with_stats = []
+    for day in dates:
+        run = get_run_by_day(conn, day=day)
+        run_id = run["run_id"] if run else None
+        rating = 0
+        if run_id:
+            feedback = get_run_feedback(conn, run_id=run_id)
+            rating = feedback["rating"] if feedback else 0
+        dates_with_stats.append({"day": day, "run_id": run_id, "rating": rating})
+
+    # Get recent runs
+    runs = get_recent_runs_summary(conn, limit=10)
+
+    # Pagination
+    total_pages = (total + per_page - 1) // per_page if total > 0 else 1
+
+    return {
+        "dates": dates_with_stats,
+        "runs": runs,
+        "pagination": {
+            "page": page,
+            "per_page": per_page,
+            "total": total,
+            "total_pages": total_pages,
+            "has_prev": page > 1,
+            "has_next": page < total_pages,
+        }
+    }
+
+
+def build_debug_stats(conn, *, date_limit: int = 10) -> dict:
+    """Build data for the /debug/stats endpoint.
+
+    Composes repo primitives to build debug statistics.
+
+    Returns:
+        {
+            "items_count": 1234,
+            "runs_count": 45,
+            "items_by_date": [{"date": "2026-01-25", "items": 150}, ...],
+            "recent_runs": [{"run_id": "...", ...}, ...]
+        }
+    """
+    # Get last N dates
+    dates = get_distinct_dates(conn, limit=date_limit)
+
+    # Counts scoped to those dates
+    items_count = count_items_for_dates(conn, dates=dates)
+    runs_count = count_runs_for_dates(conn, dates=dates)
+
+    # Breakdown by date
+    items_by_date = get_items_count_by_date(conn, dates=dates)
+
+    # Recent runs
+    recent_runs = get_recent_runs_summary(conn, limit=10)
+
+    return {
+        "items_count": items_count,
+        "runs_count": runs_count,
+        "items_by_date": items_by_date,
+        "recent_runs": recent_runs,
+    }

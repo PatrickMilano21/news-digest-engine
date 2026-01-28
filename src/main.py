@@ -8,7 +8,7 @@ import uuid
 from datetime import datetime, timezone, date
 
 from fastapi import FastAPI, Request, HTTPException, Header
-from fastapi.responses import JSONResponse, HTMLResponse
+from fastapi.responses import JSONResponse, HTMLResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.exceptions import RequestValidationError
@@ -25,6 +25,7 @@ from src.repo import (
     get_run_failures_with_sources, get_run_artifacts,
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
+    get_distinct_dates,
 )
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
@@ -51,21 +52,65 @@ def render_ui_error(request: Request, status: int, message: str) -> HTMLResponse
         status_code=status
     )
 
-@app.get("/", response_class=HTMLResponse)
-def root(request: Request, page: int = 1):
-    """Home page with tabbed navigation."""
+@app.get("/")
+def root(request: Request):
+    """Redirect to most recent digest (customer landing page)."""
     with db_conn() as conn:
-        data = build_homepage_data(conn, page=page, per_page=10)
+        dates = get_distinct_dates(conn, limit=1)
+
+    if dates:
+        return RedirectResponse(url=f"/ui/date/{dates[0]}", status_code=302)
+
+    # No data yet - show welcome page
+    return templates.TemplateResponse(
+        request,
+        "welcome.html",
+        {}
+    )
+
+@app.get("/api/history")
+def api_history(limit: int = 20):
+    """Return recent dates with ratings for nav menu."""
+    with db_conn() as conn:
+        data = build_homepage_data(conn, page=1, per_page=limit)
+    return {"dates": data["dates"]}
+
+
+@app.get("/ui/history", response_class=HTMLResponse)
+def ui_history(request: Request, page: int = 1):
+    """History page showing all past digests."""
+    with db_conn() as conn:
+        data = build_homepage_data(conn, page=page, per_page=15)
 
     return templates.TemplateResponse(
         request,
-        "home.html",
+        "history.html",
         {
             "dates": data["dates"],
-            "runs": data["runs"],
             "pagination": data["pagination"],
         }
     )
+
+
+@app.get("/ui/config", response_class=HTMLResponse)
+def ui_config(request: Request):
+    """Config page (placeholder for future preferences)."""
+    return templates.TemplateResponse(
+        request,
+        "config.html",
+        {}
+    )
+
+
+@app.get("/ui/settings", response_class=HTMLResponse)
+def ui_settings(request: Request):
+    """Settings page (placeholder)."""
+    return templates.TemplateResponse(
+        request,
+        "settings.html",
+        {}
+    )
+
 
 @app.get("/health")
 def health(request: Request):
@@ -226,10 +271,24 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
 
     run_id = run.get("run_id") if run else None
 
+    # Format run timestamp for display (customer-safe)
+    run_status = None
+    if run:
+        finished_at = run.get("finished_at")
+        if finished_at:
+            try:
+                dt = datetime.fromisoformat(finished_at.replace("Z", "+00:00"))
+                run_status = {
+                    "ok": run.get("status") == "ok",
+                    "updated_at": dt.strftime("%b %d, %Y at %I:%M %p").replace(" 0", " "),
+                }
+            except (ValueError, AttributeError):
+                pass
+
     return templates.TemplateResponse(
         request,
         "date.html",
-        {"day": day, "items": display_items, "count": len(display_items), "run": run, "run_id": run_id}
+        {"day": day, "items": display_items, "count": len(display_items), "run": run, "run_id": run_id, "run_status": run_status}
     )
 
 @app.get("/ui/item/{item_id}", response_class=HTMLResponse)

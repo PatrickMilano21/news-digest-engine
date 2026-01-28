@@ -66,14 +66,17 @@ def test_digest_rejects_invalid_date(client):
 
 
 def test_digest_returns_html(client):
+    """Digest endpoint returns email-safe HTML (no debug data)."""
     day = "2026-01-14"
     seed_db(day)
 
     resp = client.get(f"/digest/{day}", params={"top_n": 2})
     assert resp.status_code == 200
     assert "text/html" in resp.headers.get("content-type", "")
-    assert f"Digest for {day}" in resp.text
-    assert "Why ranked" in resp.text
+    assert "News Digest" in resp.text
+    # Should NOT contain debug data
+    assert "run_id" not in resp.text
+    assert "Why ranked" not in resp.text
 
 
 def test_digest_404_when_no_data(client):

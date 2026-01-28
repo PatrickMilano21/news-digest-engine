@@ -1,19 +1,181 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}News Digest{% endblock %}</title>
     <style>
+        /* Shared color variables - keep in sync with src/ui_constants.py */
+        :root {
+            --color-link: #0066cc;
+            --color-link-hover: #0052a3;
+            --color-text-primary: #1a1a1a;
+            --color-text-secondary: #666;
+            --color-text-muted: #888;
+            --color-text-meta: #555;
+            --color-text-body: #333;
+            --color-border: #e0e0e0;
+            --color-border-light: #f0f0f0;
+            --color-summary-bg: #f8fafc;
+            --color-summary-border: #0066cc;
+            --color-refusal-bg: #fef7e0;
+            --color-refusal-border: #f9ab00;
+            --color-refusal-text: #5f4b00;
+            --color-status-ok: #2e7d32;
+        }
+
+        * { box-sizing: border-box; }
         body {
             font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
-            margin: 24px;
+            margin: 0;
+            padding: 24px;
             max-width: 900px;
+            margin-left: auto;
+            margin-right: auto;
         }
-        a { color: #0066cc; }
+        a { color: var(--color-link); }
+
+        /* Top bar with hamburger */
+        .top-bar {
+            display: flex;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 12px;
+            border-bottom: 1px solid var(--color-border);
+        }
+        .menu-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 8px;
+            margin-right: 12px;
+            border-radius: 4px;
+            line-height: 1;
+        }
+        .menu-btn:hover {
+            background: var(--color-border-light);
+        }
+        .menu-btn:focus-visible {
+            outline: 2px solid var(--color-link);
+            outline-offset: 2px;
+        }
+        .top-bar-title {
+            font-size: 18px;
+            font-weight: 600;
+            color: var(--color-text-primary);
+        }
+
+        /* Overlay */
+        .nav-overlay {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.3);
+            z-index: 998;
+        }
+        .nav-overlay.open { display: block; }
+
+        /* Left nav panel */
+        .left-nav {
+            position: fixed;
+            top: 0;
+            left: -300px;
+            width: 300px;
+            height: 100%;
+            background: #fff;
+            box-shadow: 2px 0 8px rgba(0,0,0,0.15);
+            z-index: 999;
+            transition: left 0.25s ease;
+            display: flex;
+            flex-direction: column;
+        }
+        .left-nav.open { left: 0; }
+
+        .nav-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--color-border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        .nav-header h2 {
+            margin: 0;
+            font-size: 18px;
+            color: var(--color-text-primary);
+        }
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 4px 8px;
+            border-radius: 4px;
+            color: var(--color-text-secondary);
+        }
+        .close-btn:hover { background: var(--color-border-light); }
+
+        /* Nav links */
+        .nav-links {
+            padding: 8px 0;
+        }
+        .nav-link {
+            display: block;
+            padding: 14px 20px;
+            color: var(--color-text-primary);
+            text-decoration: none;
+            font-size: 15px;
+            border-bottom: 1px solid var(--color-border-light);
+        }
+        .nav-link:hover {
+            background: var(--color-border-light);
+        }
+        .nav-link-icon {
+            margin-right: 12px;
+            opacity: 0.7;
+        }
     </style>
     {% block head %}{% endblock %}
 </head>
 <body>
+<!-- Overlay -->
+<div class="nav-overlay" id="navOverlay" onclick="closeNav()"></div>
+
+<!-- Left nav panel -->
+<nav class="left-nav" id="leftNav">
+    <div class="nav-header">
+        <h2>Menu</h2>
+        <button class="close-btn" onclick="closeNav()" aria-label="Close menu">&times;</button>
+    </div>
+    <div class="nav-links">
+        <a href="/" class="nav-link"><span class="nav-link-icon">📰</span>Today's Digest</a>
+        <a href="/ui/history" class="nav-link"><span class="nav-link-icon">📅</span>History</a>
+        <a href="/ui/config" class="nav-link"><span class="nav-link-icon">⚙️</span>Config</a>
+        <a href="/ui/settings" class="nav-link"><span class="nav-link-icon">🔧</span>Settings</a>
+    </div>
+</nav>
+
+<!-- Top bar -->
+<div class="top-bar">
+    <button class="menu-btn" onclick="openNav()" aria-label="Open menu">&#9776;</button>
+    <span class="top-bar-title">News Digest</span>
+</div>
+
 {% block content %}{% endblock %}
+
+<script>
+// Nav toggle
+function openNav() {
+    document.getElementById('leftNav').classList.add('open');
+    document.getElementById('navOverlay').classList.add('open');
+}
+function closeNav() {
+    document.getElementById('leftNav').classList.remove('open');
+    document.getElementById('navOverlay').classList.remove('open');
+}
+</script>
 </body>
 </html>

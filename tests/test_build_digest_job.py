@@ -75,7 +75,8 @@ def test_build_digest_writes_file_and_prints_line(chdir_tmp, tmp_db_path, capsys
     assert os.path.exists(os.path.join("artifacts", f"digest_{day}.html"))
 
 
-def test_digest_contains_run_header(chdir_tmp, tmp_db_path):
+def test_digest_contains_header(chdir_tmp, tmp_db_path):
+    """Digest contains customer-safe header (no debug data)."""
     day = "2026-01-14"
     seed_db(day)
 
@@ -83,11 +84,15 @@ def test_digest_contains_run_header(chdir_tmp, tmp_db_path):
 
     path = os.path.join("artifacts", f"digest_{day}.html")
     text = open(path, "r", encoding="utf-8").read()
-    assert f"Digest for {day}" in text
-    assert "run_id:" in text
+    assert "News Digest" in text
+    assert "stories" in text
+    # Should NOT contain debug data
+    assert "run_id" not in text
+    assert "Why ranked" not in text
 
 
-def test_digest_contains_why_ranked_section(chdir_tmp, tmp_db_path):
+def test_digest_contains_items(chdir_tmp, tmp_db_path):
+    """Digest contains item titles and sources."""
     day = "2026-01-14"
     seed_db(day)
 
@@ -95,8 +100,9 @@ def test_digest_contains_why_ranked_section(chdir_tmp, tmp_db_path):
 
     path = os.path.join("artifacts", f"digest_{day}.html")
     text = open(path, "r", encoding="utf-8").read()
-    assert "Why ranked" in text
-    assert 'class="why"' in text
+    # Should contain item data from seed_db fixture
+    assert "AI merger talk" in text
+    assert "reuters" in text
 
 
 def test_digest_is_deterministic_bytes(chdir_tmp, tmp_db_path):

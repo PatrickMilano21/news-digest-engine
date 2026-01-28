@@ -9,6 +9,9 @@ import urllib.request
 import urllib.error
 import re
 
+# === Config ===
+BASE_URL = "http://localhost:8001"
+
 # === Tool Definitions ===
 TOOLS = [
     {
@@ -103,7 +106,7 @@ def handle_get_run(params):
     if not run_id:
         return {"ok": False, "error": "run_id is required"}
 
-    url = f"http://localhost:8000/debug/run/{run_id}"
+    url = f"{BASE_URL}/debug/run/{run_id}"
 
     try:
         req = urllib.request.Request(url, method="GET")
@@ -133,7 +136,7 @@ def handle_ui_smoke(params):
     if not re.match(r"^\d{4}-\d{2}-\d{2}$", date):
         return {"ok": False, "error": "date must be YYYY-MM-DD format"}
 
-    base_url = "http://localhost:8000"
+    base_url = BASE_URL
     date_url = f"{base_url}/ui/date/{date}"
     
     checks = {

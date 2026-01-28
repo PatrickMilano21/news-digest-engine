@@ -86,7 +86,7 @@ def test_ui_date_valid_links_present(client: TestClient):
     assert resp.status_code == 200
 
     html = resp.text
-    assert f"Digest for {day}" in html
+    assert f"News Digest — {day}" in html
     assert "Test Article One" in html
     assert "Test Article Two" in html
     # Check that article links are present (links to actual URLs now)

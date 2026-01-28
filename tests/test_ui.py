@@ -61,7 +61,7 @@ def test_ui_date_renders_items(client: TestClient):
 
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    assert f"Digest for {day}" in resp.text
+    assert f"News Digest — {day}" in resp.text
     assert "Test Article One" in resp.text
     assert "Test Article Two" in resp.text
 
@@ -126,50 +126,96 @@ def test_ui_item_400_invalid_id_returns_html(client: TestClient):
 
 # --- / (home page) tests ---
 
-def test_home_page_returns_html(client: TestClient):
-    """Home page returns HTML with navigation."""
+def test_home_redirects_to_latest_date(client: TestClient):
+    """Home page redirects to most recent date's digest."""
+    day = "2026-01-20"
+    seed_items_for_day(day)
+
+    # Don't follow redirects to verify redirect behavior
+    resp = client.get("/", follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == f"/ui/date/{day}"
+
+
+def test_home_shows_welcome_when_no_data(client: TestClient):
+    """Home page shows welcome message when no digests exist."""
     resp = client.get("/")
 
     assert resp.status_code == 200
     assert "text/html" in resp.headers["content-type"]
-    assert "News Digest Engine" in resp.text
+    assert "Welcome to News Digest" in resp.text
+    assert "No digests available yet" in resp.text
 
 
-def test_home_page_shows_date_links(client: TestClient):
-    """Home page shows links to date pages."""
+# --- /api/history tests ---
+
+def test_api_history_returns_dates(client: TestClient):
+    """API history endpoint returns dates with ratings."""
     day = "2026-01-20"
     seed_items_for_day(day)
 
-    resp = client.get("/")
+    resp = client.get("/api/history")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "dates" in data
+    assert len(data["dates"]) >= 1
+    assert data["dates"][0]["day"] == day
+
+
+def test_api_history_empty_when_no_data(client: TestClient):
+    """API history returns empty list when no digests exist."""
+    resp = client.get("/api/history")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["dates"] == []
+
+
+# --- Navigation tests ---
+
+def test_pages_have_hamburger_menu(client: TestClient):
+    """All pages include hamburger menu for navigation."""
+    day = "2026-01-20"
+    seed_items_for_day(day)
+
+    resp = client.get(f"/ui/date/{day}")
+
+    assert resp.status_code == 200
+    assert "menu-btn" in resp.text  # hamburger button
+    assert "left-nav" in resp.text  # nav panel
+
+
+# --- /ui/history tests ---
+
+def test_history_page_returns_html(client: TestClient):
+    """History page returns HTML."""
+    resp = client.get("/ui/history")
+
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "History" in resp.text
+
+
+def test_history_page_shows_dates(client: TestClient):
+    """History page lists available dates."""
+    day = "2026-01-20"
+    seed_items_for_day(day)
+
+    resp = client.get("/ui/history")
 
     assert resp.status_code == 200
     assert f"/ui/date/{day}" in resp.text
 
 
-def test_home_page_shows_debug_links(client: TestClient):
-    """Home page includes links to debug tools."""
-    resp = client.get("/")
+# --- /ui/config tests ---
+
+def test_config_page_returns_html(client: TestClient):
+    """Config page returns HTML with placeholder."""
+    resp = client.get("/ui/config")
 
     assert resp.status_code == 200
-    assert "/debug/stats" in resp.text
-    assert "/docs" in resp.text
-    assert "/health" in resp.text
-
-
-def test_home_page_shows_recent_runs(client: TestClient):
-    """Home page shows recent runs when they exist."""
-    # Create a run
-    conn = get_conn()
-    try:
-        init_db(conn)
-        run_id = uuid.uuid4().hex
-        start_run(conn, run_id=run_id, started_at="2026-01-20T12:00:00Z", received=5)
-        finish_run_ok(conn, run_id=run_id, finished_at="2026-01-20T12:01:00Z",
-                      after_dedupe=5, inserted=5, duplicates=0)
-    finally:
-        conn.close()
-
-    resp = client.get("/")
-
-    assert resp.status_code == 200
-    assert f"/debug/run/{run_id}" in resp.text
+    assert "text/html" in resp.headers["content-type"]
+    assert "Config" in resp.text
+    assert "Coming Soon" in resp.text

@@ -1,0 +1,49 @@
+{% extends "_base.html" %}
+
+{% block title %}News Digest Engine{% endblock %}
+
+{% block head %}
+<style>
+    .welcome {
+        text-align: center;
+        padding: 60px 24px;
+        max-width: 500px;
+        margin: 0 auto;
+    }
+    .welcome h1 {
+        font-size: 28px;
+        color: var(--color-text-primary);
+        margin-bottom: 16px;
+    }
+    .welcome p {
+        color: var(--color-text-meta);
+        font-size: 16px;
+        line-height: 1.6;
+        margin-bottom: 24px;
+    }
+    .welcome-hint {
+        background: var(--color-summary-bg);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        padding: 16px 20px;
+        font-size: 14px;
+        color: var(--color-text-secondary);
+    }
+    .welcome-hint code {
+        background: #e8e8e8;
+        padding: 2px 6px;
+        border-radius: 4px;
+        font-family: monospace;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="welcome">
+    <h1>Welcome to News Digest</h1>
+    <p>No digests available yet. Once news items are ingested, your daily digest will appear here.</p>
+    <div class="welcome-hint">
+        Run <code>make run DATE=YYYY-MM-DD</code> to generate your first digest.
+    </div>
+</div>
+{% endblock %}

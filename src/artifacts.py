@@ -1,196 +1,202 @@
+"""Generate email-safe digest HTML artifacts.
+
+These artifacts are static HTML files saved to artifacts/ directory.
+They must be:
+- Email-client compatible (table layout, inline-friendly CSS)
+- Customer-safe (no debug data like run_id, scores, evidence)
+- Self-contained (no external resources)
+"""
 from __future__ import annotations
 
 import html
-from datetime import datetime
 
 from src.schemas import NewsItem
 from src.scoring import RankConfig
 from src.llm_schemas.summary import SummaryResult
-
+from src.ui_constants import Colors, Strings, format_date_short, format_datetime_friendly
 
 
 def esc(s: str) -> str:
+    """HTML-escape a string."""
     return html.escape(s, quote=True)
 
-def render_run_header(*, day: str, run: dict | None) -> str:
-    if run is None:
-        return f"<h2>Digest for {esc(day)}</h2><p><em>No run record found for this day.</em></p>"
-    
-    run_id = run.get("run_id", "")
-    status = run.get("status", "")
-    started_at = run.get("started_at", "")
-    finished_at = run.get("finished_at", "")
 
-    received = run.get("received", 0)
-    after_dedupe = run.get("after_dedupe", 0)
-    inserted = run.get("inserted", 0)
-    duplicates = run.get("duplicates", 0)
+def render_header(*, day: str, count: int, run: dict | None) -> str:
+    """Render digest header (customer-safe, no debug data)."""
+    # Format the date nicely
+    day_formatted = format_date_short(day + "T00:00:00")
 
-    return f"""
-    <h2>Digest for {esc(day)}</h2>
-    <div class="run">
-      <div><strong>run_id:</strong> {esc(str(run_id))}</div>
-      <div><strong>status:</strong> {esc(str(status))}</div>
-      <div><strong>started_at:</strong> {esc(str(started_at))}</div>
-      <div><strong>finished_at:</strong> {esc(str(finished_at))}</div>
-      <div class="counts">
-        <span><strong>received:</strong> {received}</span>
-        <span><strong>after_dedupe:</strong> {after_dedupe}</span>
-        <span><strong>inserted:</strong> {inserted}</span>
-        <span><strong>duplicates:</strong> {duplicates}</span>
-      </div>
-    </div>
-    """
+    # Get run timestamp if available
+    updated_at = ""
+    if run and run.get("finished_at"):
+        updated_at = format_datetime_friendly(run["finished_at"])
 
-def render_why_ranked(expl: dict) -> str:
-    topics = expl.get("matched_topics", [])
-    kws = expl.get("matched_keywords", [])
-    source_weight = expl.get("source_weight", 1.0)
-    age_hours = expl.get("age_hours", 0.0)
-    recency_decay = expl.get("recency_decay", 1.0)
-    relevance = expl.get("relevance", 0.0)
-    total_score = expl.get("total_score", 0.0)
-
-    topics_str = ", ".join(esc(str(t)) for t in topics) if topics else "None"
-    kw_str = ", ".join(f"{esc(k['keyword'])} (+{k['boost']})" for k in kws) if kws else "None"
+    status_line = f'<p style="color: {Colors.TEXT_MUTED}; font-size: 14px; margin: 8px 0 0 0;">Last updated {esc(updated_at)}</p>' if updated_at else ""
 
     return f"""
-    <ul class="why">
-      <li><strong>Topics matched:</strong> {topics_str}</li>
-      <li><strong>Keyword boosts:</strong> {kw_str}</li>
-      <li><strong>Relevance:</strong> {relevance}</li>
-      <li><strong>Source weight:</strong> ×{source_weight}</li>
-      <li><strong>Recency:</strong> age={age_hours}h decay={recency_decay}</li>
-      <li><strong>Total Score:</strong> {total_score}</li>
-    </ul>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td style="padding-bottom: 20px; border-bottom: 1px solid {Colors.BORDER};">
+          <h1 style="margin: 0 0 8px 0; font-size: 26px; font-weight: 600; color: {Colors.TEXT_PRIMARY};">
+            News Digest — {esc(day_formatted)}
+          </h1>
+          <p style="color: {Colors.TEXT_SECONDARY}; font-size: 15px; margin: 0;">
+            {Strings.stories_count(count)}
+          </p>
+          {status_line}
+        </td>
+      </tr>
+    </table>
     """
 
 
-def render_summary(summary: SummaryResult | None) -> str:
-    """Render LLM summary with citations, or refusal reason."""
+def render_summary_block(summary: SummaryResult | None) -> str:
+    """Render summary or refusal banner (customer-safe)."""
     if summary is None:
         return ""
 
-    # If refused, show the reason
     if summary.refusal:
         return f"""
-        <div class="summary refusal">
-          <p>Summary unavailable: {esc(summary.refusal)}</p>
-        </div>
+        <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px;">
+          <tr>
+            <td style="background: {Colors.REFUSAL_BG}; border-left: 3px solid {Colors.REFUSAL_BORDER}; padding: 12px 14px; border-radius: 0 6px 6px 0;">
+              <p style="margin: 0; color: {Colors.REFUSAL_TEXT}; font-size: 14px;">
+                {Strings.REFUSAL_MESSAGE}
+              </p>
+            </td>
+          </tr>
+        </table>
         """
 
-    # Build citations list
-    citations_html = ""
-    if summary.citations:
-        citation_items = []
-        for c in summary.citations:
-            snippet = esc(c.evidence_snippet)
-            url = esc(c.source_url)
-            citation_items.append(f'<li>"{snippet}" — <a href="{url}">source</a></li>')
-        citations_html = f"""
-        <div class="citations">
-          <strong>Citations:</strong>
-          <ul>{"".join(citation_items)}</ul>
-        </div>
-        """
-
-    # Build summary section
     summary_text = esc(summary.summary or "")
+
+    # Tags
     tags_html = ""
     if summary.tags:
-        tags_html = f'<div class="tags">Tags: {", ".join(esc(t) for t in summary.tags)}</div>'
+        tags_list = ", ".join(esc(t) for t in summary.tags)
+        tags_html = f'<p style="margin: 8px 0 0 0; font-size: 12px; color: {Colors.TEXT_SECONDARY};">{Strings.TOPICS_LABEL} {tags_list}</p>'
+
+    # Citation count (don't show full citations in email - too long)
+    citations_html = ""
+    if summary.citations:
+        citations_html = f'<p style="margin: 6px 0 0 0; font-size: 12px; color: {Colors.TEXT_SECONDARY};">{Strings.sources_label(len(summary.citations))}</p>'
 
     return f"""
-    <div class="summary">
-      <p class="summary-text">{summary_text}</p>
-      {tags_html}
-      {citations_html}
-    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px;">
+      <tr>
+        <td style="background: {Colors.SUMMARY_BG}; border-left: 3px solid {Colors.SUMMARY_BORDER}; padding: 12px 14px; border-radius: 0 6px 6px 0;">
+          <p style="margin: 0 0 4px 0; font-size: 12px; font-weight: 600; color: {Colors.TEXT_SECONDARY}; text-transform: uppercase; letter-spacing: 0.5px;">{Strings.SUMMARY_LABEL}</p>
+          <p style="margin: 0; line-height: 1.6; color: {Colors.TEXT_BODY};">{summary_text}</p>
+          {tags_html}
+          {citations_html}
+        </td>
+      </tr>
+    </table>
     """
 
 
-def render_item(*, idx: int, item: NewsItem, expl: dict, summary: SummaryResult | None = None) -> str:
+def render_item(*, idx: int, item: NewsItem, summary: SummaryResult | None = None) -> str:
+    """Render a single item (customer-safe, no debug data)."""
     title = esc(item.title)
     url = esc(str(item.url))
     source = esc(item.source)
-    published_at = esc(item.published_at.isoformat())
+    pub_date = format_date_short(item.published_at.isoformat())
 
-    evidence = item.evidence or ""
-    evidence_html = f"<p class='evidence'>{esc(evidence)}</p>" if evidence else ""
-
-    why_html = render_why_ranked(expl)
-    summary_html = render_summary(summary)
+    summary_html = render_summary_block(summary)
 
     return f"""
-    <div class="item">
-      <div class="rank">#{idx}</div>
-      <div class="main">
-        <div class="title"><a href="{url}">{title}</a></div>
-        <div class="meta">{source} • {published_at}</div>
-        {summary_html}
-        {evidence_html}
-        <div class="whywrap">
-          <div class="whytitle">Why ranked</div>
-          {why_html}
-        </div>
-      </div>
-    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom: 16px;">
+      <tr>
+        <td style="border: 1px solid {Colors.BORDER}; border-radius: 8px; padding: 16px; background: #fff;">
+          <p style="margin: 0 0 6px 0; font-size: 17px; font-weight: 600; line-height: 1.4;">
+            <a href="{url}" style="color: {Colors.TEXT_PRIMARY}; text-decoration: none;">{title}</a>
+          </p>
+          <p style="margin: 0; color: {Colors.TEXT_META}; font-size: 13px;">
+            {source} · {pub_date}
+          </p>
+          {summary_html}
+        </td>
+      </tr>
+    </table>
     """
 
 
 def render_digest_html(day, run, ranked_items, explanations, cfg, now, top_n, summaries=None) -> str:
-    """Render the full digest HTML page.
+    """Render email-safe digest HTML.
 
     Args:
+        day: Date string (YYYY-MM-DD)
+        run: Run record dict (or None)
+        ranked_items: List of NewsItem objects
+        explanations: List of explanation dicts (ignored - debug data)
+        cfg: RankConfig (ignored - debug data)
+        now: Current datetime (ignored)
+        top_n: Number of items
         summaries: Optional list of SummaryResult, one per ranked item.
-                   If None, summaries section is omitted.
-    """
-    header = render_run_header(day=day, run=run)
 
+    Returns:
+        Complete HTML document string.
+    """
     # Default to empty list if no summaries provided
     if summaries is None:
         summaries = [None] * len(ranked_items)
 
-    blocks: list[str] = []
-    for i, item in enumerate(ranked_items, start=1):
-        expl = explanations[i - 1] if i - 1 < len(explanations) else {}
-        summary = summaries[i - 1] if i - 1 < len(summaries) else None
-        blocks.append(render_item(idx=i, item=item, expl=expl, summary=summary))
+    header = render_header(day=day, count=len(ranked_items), run=run)
 
-    items_html = "\n".join(blocks) if blocks else "<p><em>No items found for this day.</em></p>"
+    # Render items
+    items_html_parts: list[str] = []
+    for i, item in enumerate(ranked_items):
+        summary = summaries[i] if i < len(summaries) else None
+        items_html_parts.append(render_item(idx=i + 1, item=item, summary=summary))
 
-    return f"""<!doctype html>
-    <html>
-    <head>
-    <meta charset="utf-8" />
-    <title>Digest {esc(day)}</title>
-    <style>
-        body {{ font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px; }}
-        .run {{ padding: 12px; border: 1px solid #ddd; border-radius: 8px; margin-bottom: 16px; }}
-        .counts span {{ margin-right: 12px; }}
-        .item {{ display: flex; gap: 12px; padding: 12px; border: 1px solid #eee; border-radius: 8px; margin-bottom: 12px; }}
-        .rank {{ font-weight: 700; width: 40px; }}
-        .title a {{ text-decoration: none; }}
-        .meta {{ color: #555; font-size: 12px; margin-top: 4px; }}
-        .evidence {{ margin: 10px 0; color: #333; font-style: italic; }}
-        .whywrap {{ background: #fafafa; border: 1px solid #eee; padding: 10px; border-radius: 8px; }}
-        .whytitle {{ font-weight: 600; margin-bottom: 6px; }}
-        .why {{ margin: 0; padding-left: 18px; }}
-        .summary {{ background: #f0f7ff; border: 1px solid #cce0ff; padding: 12px; border-radius: 8px; margin: 10px 0; }}
-        .summary.refusal {{ background: #fff5f5; border-color: #ffcccc; }}
-        .summary-text {{ margin: 0 0 8px 0; }}
-        .tags {{ font-size: 12px; color: #666; margin-bottom: 8px; }}
-        .citations {{ font-size: 13px; }}
-        .citations ul {{ margin: 4px 0; padding-left: 20px; }}
-        .citations li {{ margin: 4px 0; }}
-    </style>
-    </head>
-    <body>
-    {header}
-    <h3>Top {top_n}</h3>
-    {items_html}
-    </body>
-    </html>
+    items_html = "\n".join(items_html_parts) if items_html_parts else f"""
+    <table width="100%" cellpadding="0" cellspacing="0" border="0">
+      <tr>
+        <td style="text-align: center; padding: 40px 20px; color: {Colors.TEXT_SECONDARY};">
+          <p>{Strings.NO_STORIES}</p>
+        </td>
+      </tr>
+    </table>
     """
 
-
+    return f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>News Digest — {esc(day)}</title>
+  <style>
+    body {{
+      font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 0;
+      padding: 24px;
+      background: #f5f5f5;
+    }}
+    .container {{
+      max-width: 600px;
+      margin: 0 auto;
+      background: #fff;
+      padding: 24px;
+      border-radius: 8px;
+    }}
+    a {{ color: {Colors.LINK}; }}
+    a:hover {{ color: {Colors.LINK_HOVER}; }}
+  </style>
+</head>
+<body>
+  <div class="container">
+    {header}
+    <div style="margin-top: 24px;">
+      {items_html}
+    </div>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 24px; border-top: 1px solid {Colors.BORDER};">
+      <tr>
+        <td style="padding-top: 16px; text-align: center; color: {Colors.TEXT_MUTED}; font-size: 12px;">
+          <p style="margin: 0;">{Strings.GENERATED_BY}</p>
+        </td>
+      </tr>
+    </table>
+  </div>
+</body>
+</html>
+"""

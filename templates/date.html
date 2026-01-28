@@ -1,78 +1,141 @@
 {% extends "_base.html" %}
 
-{% block title %}Digest for {{ day }}{% endblock %}
+{% block title %}News Digest — {{ day }}{% endblock %}
 
 {% block head %}
 <style>
-    .run-info {
-        background: #f5f5f5;
-        padding: 12px 16px;
-        border-radius: 8px;
-        margin-bottom: 20px;
-        font-size: 14px;
+    /* Page header */
+    .page-header {
+        margin-bottom: 28px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--color-border);
     }
-    .run-info span { margin-right: 16px; }
+    .page-header h1 {
+        margin: 0 0 8px 0;
+        font-size: 26px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .page-subtitle {
+        color: var(--color-text-secondary);
+        font-size: 15px;
+        margin: 0;
+    }
+    .run-status {
+        font-size: 13px;
+        color: var(--color-text-muted);
+        margin-top: 8px;
+    }
+    .status-ok {
+        color: var(--color-status-ok);
+    }
+    .status-ok::before {
+        content: "✓ ";
+    }
 
+    /* Item cards */
     .item {
-        border: 1px solid #e0e0e0;
+        border: 1px solid var(--color-border);
         border-radius: 8px;
-        padding: 16px;
+        padding: 20px;
         margin-bottom: 16px;
+        background: #fff;
+        transition: box-shadow 0.15s, border-color 0.15s;
     }
-    .item-header {
-        display: flex;
-        justify-content: space-between;
-        align-items: flex-start;
+    .item:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border-color: #d0d0d0;
     }
     .item-title {
-        font-size: 18px;
+        font-size: 17px;
         font-weight: 600;
+        margin: 0 0 8px 0;
+        line-height: 1.4;
+    }
+    .item-title a {
+        color: var(--color-text-primary);
+        text-decoration: none;
+    }
+    .item-title a:hover {
+        color: var(--color-link);
+    }
+    .external-icon {
+        font-size: 12px;
+        margin-left: 4px;
+        opacity: 0.7;
+    }
+    .item-meta {
+        color: var(--color-text-meta);
+        font-size: 13px;
+    }
+
+    /* Summary box */
+    .summary-box {
+        background: var(--color-summary-bg);
+        border-left: 3px solid var(--color-summary-border);
+        padding: 14px 16px;
+        margin-top: 14px;
+        border-radius: 0 6px 6px 0;
+    }
+    .summary-box p {
+        margin: 0;
+        line-height: 1.6;
+        color: var(--color-text-body);
+    }
+    .summary-label {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+    }
+    .summary-tags {
+        margin-top: 10px;
+    }
+    .tags-label {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        margin-right: 6px;
+    }
+    .summary-tag {
+        display: inline-block;
+        background: #e8f0fe;
+        color: #1967d2;
+        padding: 3px 10px;
+        border-radius: 12px;
+        margin-right: 6px;
         margin-bottom: 4px;
-    }
-    .item-title a { color: #1a1a1a; text-decoration: none; }
-    .item-title a:hover { color: #0066cc; }
-
-    .meta {
-        color: #666;
-        font-size: 13px;
-        margin-bottom: 12px;
+        font-size: 12px;
     }
 
-    .summary {
-        background: #f0f7ff;
-        border: 1px solid #cce0ff;
-        border-radius: 6px;
-        padding: 12px;
-        margin: 12px 0;
+    /* Refusal banner */
+    .refusal-banner {
+        background: var(--color-refusal-bg);
+        border-left: 3px solid var(--color-refusal-border);
+        padding: 14px 16px;
+        margin-top: 14px;
+        border-radius: 0 6px 6px 0;
+        color: var(--color-refusal-text);
+        font-size: 14px;
     }
-    .summary.refusal {
-        background: #fff5f5;
-        border-color: #ffcccc;
-        color: #666;
-        font-style: italic;
-    }
-    .summary-text { margin: 0 0 8px 0; }
-    .tags { font-size: 12px; color: #666; }
-    .citations { font-size: 13px; margin-top: 8px; }
-    .citations ul { margin: 4px 0; padding-left: 20px; }
 
-    .why {
-        background: #fafafa;
-        border: 1px solid #eee;
-        border-radius: 6px;
-        padding: 10px 12px;
-        font-size: 13px;
-        margin-top: 12px;
-    }
-    .why-title { font-weight: 600; margin-bottom: 6px; }
-
+    /* Feedback buttons */
     .feedback {
         display: flex;
+        align-items: center;
         gap: 8px;
-        margin-top: 12px;
+        margin-top: 16px;
+        padding-top: 14px;
+        border-top: 1px solid var(--color-border-light);
+    }
+    .feedback-label {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        margin-right: 4px;
     }
     .feedback-btn {
-        padding: 6px 16px;
+        padding: 10px 20px;
         border: 1px solid #ddd;
         border-radius: 4px;
         background: #fff;
@@ -80,97 +143,111 @@
         font-size: 14px;
         transition: all 0.15s;
     }
-    .feedback-btn:hover { background: #f5f5f5; }
-    .feedback-btn.active-up { background: #e8f5e9; border-color: #4caf50; color: #2e7d32; }
-    .feedback-btn.active-down { background: #ffebee; border-color: #f44336; color: #c62828; }
+    .feedback-btn:hover {
+        background: #f5f5f5;
+    }
+    .feedback-btn:focus-visible {
+        outline: 2px solid var(--color-link);
+        outline-offset: 2px;
+    }
+    .feedback-btn.active-up {
+        background: #e8f5e9;
+        border-color: #4caf50;
+        color: #2e7d32;
+    }
+    .feedback-btn.active-down {
+        background: #ffebee;
+        border-color: #f44336;
+        color: #c62828;
+    }
 
-    .nav { margin-bottom: 20px; }
-    .nav a { color: #0066cc; text-decoration: none; }
-    .nav a:hover { text-decoration: underline; }
+    /* Empty state */
+    .empty-state {
+        text-align: center;
+        padding: 48px 24px;
+        color: var(--color-text-secondary);
+    }
+
+    /* Mobile adjustments */
+    @media (max-width: 600px) {
+        .page-header h1 {
+            font-size: 22px;
+        }
+        .item {
+            padding: 16px;
+        }
+        .item-title {
+            font-size: 16px;
+            line-height: 1.5;
+        }
+    }
 </style>
 {% endblock %}
 
 {% block content %}
-<div class="nav">
-    <a href="/">← Back to Home</a>
+<div class="page-header">
+    <h1>News Digest — {{ day }}</h1>
+    <p class="page-subtitle">{{ count }} {% if count == 1 %}story{% else %}stories{% endif %} from today's feeds</p>
+    {% if run_status %}
+    <p class="run-status{% if run_status.ok %} status-ok{% endif %}">
+        Last updated {{ run_status.updated_at }}
+    </p>
+    {% endif %}
 </div>
-
-<h1>Digest for {{ day }}</h1>
-
-{% if run %}
-<div class="run-info">
-    <span><strong>Run:</strong> {{ run.run_id[:8] }}...</span>
-    <span><strong>Status:</strong> {{ run.status }}</span>
-    <span><strong>Items:</strong> {{ count }}</span>
-</div>
-{% endif %}
 
 {% for d in items %}
 <div class="item" data-item-url="{{ d.item.url }}">
-    <div class="item-header">
-        <div>
-            <div class="item-title">
-                <a href="{{ d.item.url }}" target="_blank">{{ d.item.title }}</a>
-            </div>
-            <div class="meta">
-                {{ d.item.source }} • {{ d.item.published_at.isoformat()[:16] }} • Score: {{ "%.3f"|format(d.score) }}
-            </div>
-        </div>
+    <h2 class="item-title">
+        <a href="{{ d.item.url }}" target="_blank" rel="noopener">{{ d.item.title }}<span class="external-icon">↗</span></a>
+    </h2>
+    <div class="item-meta">
+        {{ d.item.source }} · {{ d.item.published_at.strftime('%b %d, %Y') }}
     </div>
 
     {% if d.summary %}
         {% if d.summary.refusal %}
-        <div class="summary refusal">
-            Summary unavailable: {{ d.summary.refusal }}
+        <div class="refusal-banner">
+            Summary not generated — not enough source content
         </div>
         {% else %}
-        <div class="summary">
-            <p class="summary-text">{{ d.summary.summary }}</p>
+        <div class="summary-box">
+            <div class="summary-label">Summary</div>
+            <p>{{ d.summary.summary }}</p>
             {% if d.summary.tags %}
-            <div class="tags">Tags: {{ d.summary.tags | join(", ") }}</div>
+            <div class="summary-tags">
+                <span class="tags-label">Topics:</span>
+                {% for tag in d.summary.tags %}
+                <span class="summary-tag">{{ tag }}</span>
+                {% endfor %}
+            </div>
             {% endif %}
             {% if d.summary.citations %}
-            <div class="citations">
-                <strong>Citations:</strong>
-                <ul>
-                {% for c in d.summary.citations %}
-                    <li>"{{ c.evidence_snippet[:100] }}{% if c.evidence_snippet|length > 100 %}...{% endif %}"</li>
-                {% endfor %}
-                </ul>
+            <div class="summary-tags" style="margin-top: 6px;">
+                <span class="tags-label">Sources: {{ d.summary.citations|length }} article{% if d.summary.citations|length != 1 %}s{% endif %}</span>
             </div>
             {% endif %}
         </div>
         {% endif %}
     {% endif %}
 
-    <div class="why">
-        <div class="why-title">Why Ranked</div>
-        <div>
-            {% if d.expl.matched_topics %}
-            <strong>Topics:</strong> {{ d.expl.matched_topics | join(", ") }}<br>
-            {% endif %}
-            {% if d.expl.matched_keywords %}
-            <strong>Keywords:</strong>
-            {% for k in d.expl.matched_keywords %}{{ k.keyword }} (+{{ k.boost }}){% if not loop.last %}, {% endif %}{% endfor %}<br>
-            {% endif %}
-            <strong>Relevance:</strong> {{ d.expl.relevance }} •
-            <strong>Source:</strong> ×{{ d.expl.source_weight }} •
-            <strong>Recency:</strong> {{ "%.2f"|format(d.expl.recency_decay) }} •
-            <strong>Total:</strong> {{ "%.3f"|format(d.expl.total_score) }}
-        </div>
-    </div>
-
     {% if run_id %}
     <div class="feedback" data-item-url="{{ d.item.url }}">
-        <button class="feedback-btn" data-useful="true" onclick="sendFeedback(this, true)">👍 Useful</button>
-        <button class="feedback-btn" data-useful="false" onclick="sendFeedback(this, false)">👎 Not useful</button>
+        <span class="feedback-label">Was this helpful?</span>
+        <button class="feedback-btn" data-useful="true" onclick="sendFeedback(this, true)">Useful</button>
+        <button class="feedback-btn" data-useful="false" onclick="sendFeedback(this, false)">Not useful</button>
+    </div>
+    {% else %}
+    <div class="feedback">
+        <span class="feedback-label">Feedback available after daily processing</span>
     </div>
     {% endif %}
 </div>
 {% endfor %}
 
 {% if not items %}
-<p><em>No items found.</em></p>
+<div class="empty-state">
+    <p>No stories found for this date. <a href="/">View other dates</a></p>
+</div>
 {% endif %}
 
 <script>
@@ -192,7 +269,6 @@ async function sendFeedback(btn, useful) {
         });
 
         if (resp.ok) {
-            // Update button states
             container.querySelectorAll('.feedback-btn').forEach(b => {
                 b.classList.remove('active-up', 'active-down');
             });

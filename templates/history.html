@@ -1,0 +1,154 @@
+{% extends "_base.html" %}
+
+{% block title %}History — News Digest{% endblock %}
+
+{% block head %}
+<style>
+    .page-header {
+        margin-bottom: 28px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--color-border);
+    }
+    .page-header h1 {
+        margin: 0 0 8px 0;
+        font-size: 26px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .page-subtitle {
+        color: var(--color-text-secondary);
+        font-size: 15px;
+        margin: 0;
+    }
+
+    /* History list */
+    .history-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    .history-item {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 16px 20px;
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        margin-bottom: 12px;
+        background: #fff;
+        transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .history-item:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border-color: #d0d0d0;
+    }
+    .history-date {
+        font-size: 16px;
+        font-weight: 500;
+    }
+    .history-date a {
+        color: var(--color-text-primary);
+        text-decoration: none;
+    }
+    .history-date a:hover {
+        color: var(--color-link);
+    }
+    .history-meta {
+        font-size: 13px;
+        color: var(--color-text-secondary);
+        margin-top: 4px;
+    }
+    .history-stars {
+        color: #f5a623;
+        font-size: 18px;
+    }
+
+    .empty-state {
+        text-align: center;
+        padding: 48px 24px;
+        color: var(--color-text-secondary);
+    }
+
+    /* Pagination */
+    .pagination {
+        margin-top: 24px;
+        display: flex;
+        gap: 8px;
+        align-items: center;
+        justify-content: center;
+    }
+    .pagination a, .pagination span {
+        padding: 8px 14px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        text-decoration: none;
+        font-size: 14px;
+    }
+    .pagination a:hover {
+        background: var(--color-border-light);
+    }
+    .pagination .disabled {
+        color: var(--color-text-muted);
+        background: #f9f9f9;
+    }
+    .pagination .current {
+        background: var(--color-link);
+        color: #fff;
+        border-color: var(--color-link);
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>History</h1>
+    <p class="page-subtitle">Browse past digests</p>
+</div>
+
+{% if dates %}
+<ul class="history-list">
+    {% for d in dates %}
+    <li class="history-item">
+        <div>
+            <div class="history-date">
+                <a href="/ui/date/{{ d.day }}">{{ d.day }}</a>
+            </div>
+            {% if d.item_count %}
+            <div class="history-meta">{{ d.item_count }} stories</div>
+            {% endif %}
+        </div>
+        <div class="history-stars">
+            {% if d.rating %}
+                {% for i in range(d.rating) %}★{% endfor %}{% for i in range(5 - d.rating) %}☆{% endfor %}
+            {% else %}
+                <span style="color: #ccc;">☆☆☆☆☆</span>
+            {% endif %}
+        </div>
+    </li>
+    {% endfor %}
+</ul>
+
+{% if pagination.total_pages > 1 %}
+<div class="pagination">
+    {% if pagination.has_prev %}
+        <a href="/ui/history?page={{ pagination.page - 1 }}">← Prev</a>
+    {% else %}
+        <span class="disabled">← Prev</span>
+    {% endif %}
+
+    <span class="current">{{ pagination.page }} / {{ pagination.total_pages }}</span>
+
+    {% if pagination.has_next %}
+        <a href="/ui/history?page={{ pagination.page + 1 }}">Next →</a>
+    {% else %}
+        <span class="disabled">Next →</span>
+    {% endif %}
+</div>
+{% endif %}
+
+{% else %}
+<div class="empty-state">
+    <p>No digests yet. <a href="/">Go to Today's Digest</a></p>
+</div>
+{% endif %}
+{% endblock %}

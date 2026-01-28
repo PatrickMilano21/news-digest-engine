@@ -25,6 +25,19 @@ Claude is allowed to:
 - write tests
 - run tests
 
+### Task Tracking (REQUIRED)
+
+Always use `TaskCreate` at the start of executing a plan to break down the work into visible steps. This provides:
+- Progress visibility for Patrick
+- Clear checkpoints for review
+- Resume capability if session is interrupted
+
+When starting a ticket:
+1. Create tasks for each major step in the plan
+2. Mark tasks `in_progress` when starting work
+3. Mark tasks `completed` when done
+4. Use `TaskList` to show current state
+
 Claude is NOT allowed to:
 - change schemas
 - weaken grounding or refusal semantics

@@ -1,0 +1,206 @@
+{% extends "_base.html" %}
+
+{% block title %}Digest for {{ day }}{% endblock %}
+
+{% block head %}
+<style>
+    .run-info {
+        background: #f5f5f5;
+        padding: 12px 16px;
+        border-radius: 8px;
+        margin-bottom: 20px;
+        font-size: 14px;
+    }
+    .run-info span { margin-right: 16px; }
+
+    .item {
+        border: 1px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 16px;
+        margin-bottom: 16px;
+    }
+    .item-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+    .item-title {
+        font-size: 18px;
+        font-weight: 600;
+        margin-bottom: 4px;
+    }
+    .item-title a { color: #1a1a1a; text-decoration: none; }
+    .item-title a:hover { color: #0066cc; }
+
+    .meta {
+        color: #666;
+        font-size: 13px;
+        margin-bottom: 12px;
+    }
+
+    .summary {
+        background: #f0f7ff;
+        border: 1px solid #cce0ff;
+        border-radius: 6px;
+        padding: 12px;
+        margin: 12px 0;
+    }
+    .summary.refusal {
+        background: #fff5f5;
+        border-color: #ffcccc;
+        color: #666;
+        font-style: italic;
+    }
+    .summary-text { margin: 0 0 8px 0; }
+    .tags { font-size: 12px; color: #666; }
+    .citations { font-size: 13px; margin-top: 8px; }
+    .citations ul { margin: 4px 0; padding-left: 20px; }
+
+    .why {
+        background: #fafafa;
+        border: 1px solid #eee;
+        border-radius: 6px;
+        padding: 10px 12px;
+        font-size: 13px;
+        margin-top: 12px;
+    }
+    .why-title { font-weight: 600; margin-bottom: 6px; }
+
+    .feedback {
+        display: flex;
+        gap: 8px;
+        margin-top: 12px;
+    }
+    .feedback-btn {
+        padding: 6px 16px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        background: #fff;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.15s;
+    }
+    .feedback-btn:hover { background: #f5f5f5; }
+    .feedback-btn.active-up { background: #e8f5e9; border-color: #4caf50; color: #2e7d32; }
+    .feedback-btn.active-down { background: #ffebee; border-color: #f44336; color: #c62828; }
+
+    .nav { margin-bottom: 20px; }
+    .nav a { color: #0066cc; text-decoration: none; }
+    .nav a:hover { text-decoration: underline; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="nav">
+    <a href="/">← Back to Home</a>
+</div>
+
+<h1>Digest for {{ day }}</h1>
+
+{% if run %}
+<div class="run-info">
+    <span><strong>Run:</strong> {{ run.run_id[:8] }}...</span>
+    <span><strong>Status:</strong> {{ run.status }}</span>
+    <span><strong>Items:</strong> {{ count }}</span>
+</div>
+{% endif %}
+
+{% for d in items %}
+<div class="item" data-item-url="{{ d.item.url }}">
+    <div class="item-header">
+        <div>
+            <div class="item-title">
+                <a href="{{ d.item.url }}" target="_blank">{{ d.item.title }}</a>
+            </div>
+            <div class="meta">
+                {{ d.item.source }} • {{ d.item.published_at.isoformat()[:16] }} • Score: {{ "%.3f"|format(d.score) }}
+            </div>
+        </div>
+    </div>
+
+    {% if d.summary %}
+        {% if d.summary.refusal %}
+        <div class="summary refusal">
+            Summary unavailable: {{ d.summary.refusal }}
+        </div>
+        {% else %}
+        <div class="summary">
+            <p class="summary-text">{{ d.summary.summary }}</p>
+            {% if d.summary.tags %}
+            <div class="tags">Tags: {{ d.summary.tags | join(", ") }}</div>
+            {% endif %}
+            {% if d.summary.citations %}
+            <div class="citations">
+                <strong>Citations:</strong>
+                <ul>
+                {% for c in d.summary.citations %}
+                    <li>"{{ c.evidence_snippet[:100] }}{% if c.evidence_snippet|length > 100 %}...{% endif %}"</li>
+                {% endfor %}
+                </ul>
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
+    {% endif %}
+
+    <div class="why">
+        <div class="why-title">Why Ranked</div>
+        <div>
+            {% if d.expl.matched_topics %}
+            <strong>Topics:</strong> {{ d.expl.matched_topics | join(", ") }}<br>
+            {% endif %}
+            {% if d.expl.matched_keywords %}
+            <strong>Keywords:</strong>
+            {% for k in d.expl.matched_keywords %}{{ k.keyword }} (+{{ k.boost }}){% if not loop.last %}, {% endif %}{% endfor %}<br>
+            {% endif %}
+            <strong>Relevance:</strong> {{ d.expl.relevance }} •
+            <strong>Source:</strong> ×{{ d.expl.source_weight }} •
+            <strong>Recency:</strong> {{ "%.2f"|format(d.expl.recency_decay) }} •
+            <strong>Total:</strong> {{ "%.3f"|format(d.expl.total_score) }}
+        </div>
+    </div>
+
+    {% if run_id %}
+    <div class="feedback" data-item-url="{{ d.item.url }}">
+        <button class="feedback-btn" data-useful="true" onclick="sendFeedback(this, true)">👍 Useful</button>
+        <button class="feedback-btn" data-useful="false" onclick="sendFeedback(this, false)">👎 Not useful</button>
+    </div>
+    {% endif %}
+</div>
+{% endfor %}
+
+{% if not items %}
+<p><em>No items found.</em></p>
+{% endif %}
+
+<script>
+const runId = "{{ run_id or '' }}";
+
+async function sendFeedback(btn, useful) {
+    const container = btn.parentElement;
+    const itemUrl = container.dataset.itemUrl;
+
+    try {
+        const resp = await fetch('/feedback/item', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                run_id: runId,
+                item_url: itemUrl,
+                useful: useful
+            })
+        });
+
+        if (resp.ok) {
+            // Update button states
+            container.querySelectorAll('.feedback-btn').forEach(b => {
+                b.classList.remove('active-up', 'active-down');
+            });
+            btn.classList.add(useful ? 'active-up' : 'active-down');
+        }
+    } catch (e) {
+        console.error('Failed to send feedback:', e);
+    }
+}
+</script>
+{% endblock %}

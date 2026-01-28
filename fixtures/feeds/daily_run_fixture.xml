@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Daily Run Test Fixture</title>
+    <description>Fixture feed for testing the full daily run pipeline</description>
+
+    <item>
+      <title>AI Startup Raises $50M to Build Robot Assistants</title>
+      <link>https://fixture.example.com/ai-startup-funding</link>
+      <pubDate>Fri, 24 Jan 2026 14:00:00 GMT</pubDate>
+      <description>A San Francisco-based AI startup announced today that it has raised $50 million in Series B funding to develop robot assistants for elderly care. The company plans to deploy 1,000 units by end of 2026. CEO Jane Smith said the robots will help with daily tasks like medication reminders and mobility assistance.</description>
+    </item>
+
+    <item>
+      <title>Tech Giants Report Record Quarterly Earnings</title>
+      <link>https://fixture.example.com/tech-earnings</link>
+      <pubDate>Fri, 24 Jan 2026 12:00:00 GMT</pubDate>
+      <description>Major technology companies reported strong fourth-quarter earnings this week, with cloud computing revenue driving growth. Amazon Web Services grew 29% year-over-year, while Microsoft Azure reported 31% growth. Analysts expect continued momentum in enterprise cloud adoption throughout 2026.</description>
+    </item>
+
+    <item>
+      <title>New Study Shows Remote Work Boosts Productivity</title>
+      <link>https://fixture.example.com/remote-work-study</link>
+      <pubDate>Fri, 24 Jan 2026 10:00:00 GMT</pubDate>
+      <description>Researchers at Stanford University released findings showing that remote workers are 13% more productive than office-based counterparts. The study tracked 500 employees over 18 months. Key factors included fewer distractions, no commute time, and flexible scheduling. However, collaboration scores were 8% lower for fully remote teams.</description>
+    </item>
+
+    <item>
+      <title>Electric Vehicle Sales Surge 40% in 2025</title>
+      <link>https://fixture.example.com/ev-sales</link>
+      <pubDate>Fri, 24 Jan 2026 08:00:00 GMT</pubDate>
+      <description>Global electric vehicle sales increased 40% in 2025 compared to the previous year, according to industry data. Tesla maintained market leadership with 22% share, followed by BYD at 18%. Charging infrastructure expanded significantly, with public charging stations growing 65% worldwide.</description>
+    </item>
+
+    <item>
+      <title>Cybersecurity Threats Rise as AI-Powered Attacks Emerge</title>
+      <link>https://fixture.example.com/cybersecurity-ai</link>
+      <pubDate>Fri, 24 Jan 2026 06:00:00 GMT</pubDate>
+      <description>Security researchers warn of a new wave of AI-powered cyberattacks targeting financial institutions. The attacks use machine learning to evade traditional detection systems. Banks are urged to implement advanced threat monitoring. The FBI reported a 150% increase in sophisticated phishing attempts using AI-generated content.</description>
+    </item>
+
+  </channel>
+</rss>

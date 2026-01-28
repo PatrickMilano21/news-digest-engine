@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>Broken Feed</title>
+    <item>
+      <title>This item is fine</title>
+      <link>https://example.com/fine</link>
+      <pubDate>Fri, 24 Jan 2026 10:00:00 GMT</pubDate>
+    </item>
+    <item>
+      <title>This item has broken XML
+      <!-- Missing closing tag and malformed -->
+      <link>https://example.com/broken
+    </item>
+  </channel>
+<!-- Missing closing rss tag -->

@@ -1,0 +1,31 @@
+{% extends "_base.html" %}
+
+  {% block title %}{{ item.title }}{% endblock %}
+
+  {% block content %}
+  <p><a href="/ui/date/{{ day }}">← Back to {{ day }}</a></p>
+
+  <h1>{{ item.title }}</h1>
+  <p class="meta">{{ item.source }} • {{ item.published_at.isoformat()[:16] }}</p>
+  <p><a href="{{ item.url }}">{{ item.url }}</a></p>
+
+  {% if item.evidence %}
+  <h3>Evidence</h3>
+  <p>{{ item.evidence }}</p>
+  {% endif %}
+
+  <h3>Why Ranked</h3>
+  <ul>
+      <li><strong>Topics:</strong> {{ expl.matched_topics | join(", ") or "None" }}</li>
+      <li><strong>Keywords:</strong> 
+          {% for k in expl.matched_keywords %}
+              {{ k.keyword }} (+{{ k.boost }}){% if not loop.last %}, {% endif %}
+          {% else %}
+              None
+          {% endfor %}
+      </li>
+      <li><strong>Source weight:</strong> {{ expl.source_weight }}</li>
+      <li><strong>Age:</strong> {{ "%.1f"|format(expl.age_hours) }}h</li>
+      <li><strong>Recency decay:</strong> {{ "%.3f"|format(expl.recency_decay) }}</li>
+  </ul>
+  {% endblock %}

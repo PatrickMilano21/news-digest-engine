@@ -1,40 +1,16 @@
-# src/run.py (additions only)
+# src/run.py
 from __future__ import annotations
 
 import os
-from datetime import datetime, timezone, date
+from datetime import datetime, timezone
 import uuid
-import argparse
 
-from src.logging_utils import log_event
 from src.db import get_conn, init_db
 from src.normalize import normalize_and_dedupe
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run
+from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error
 from src.rss_fetch import RSSFetchError, fetch_rss_with_retry
 from src.rss_parse import RSSParseError, parse_rss
 
-def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument("--date", required=True, help="YYYY-MM-DD")
-    args = p.parse_args()
-
-    # Validate input
-    date.fromisoformat(args.date)
-
-    # Create a run_id for this execution (stub)
-    run_id = uuid.uuid4().hex
-
-    # Structured log (stub)
-    log_event("run_started", run_id=run_id, date=args.date)
-
-    print(f"[RUN] date={args.date} run_id={run_id} status=ok (placeholder)")
-
-    log_event("run_finished", run_id=run_id, date=args.date, status="ok")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
 
 def run_rss_ingest(*, feed_specs: list[tuple[str, str]], mode: str, fixtures_dir: str) -> dict:
     run_id = uuid.uuid4().hex

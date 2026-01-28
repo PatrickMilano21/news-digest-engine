@@ -1,33 +1,71 @@
+# Load .env file BEFORE other imports (so env vars are available)
+from dotenv import load_dotenv
+load_dotenv()
+
+import json
 import uuid
+
 from datetime import datetime, timezone, date
 
-from fastapi import FastAPI, Request, HTTPException
+from fastapi import FastAPI, Request, HTTPException, Header
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
+from fastapi.templating import Jinja2Templates
+from fastapi.exceptions import RequestValidationError
 
 from src.middleware import request_id_middleware
 from src.logging_utils import log_event
 from src.errors import problem
 
-from src.schemas import IngestRequest
-from src.db import get_conn, init_db
-from src.repo import insert_news_items, start_run, finish_run_ok, finish_run_error, get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id
+from src.schemas import IngestRequest, RunFeedbackRequest, ItemFeedbackRequest
+from src.db import db_conn, get_conn, init_db
+from src.repo import (
+    insert_news_items, start_run, finish_run_ok, finish_run_error,
+    get_latest_run, get_news_items_by_date, get_run_by_day, get_run_by_id,
+    get_run_failures_with_sources, get_run_artifacts,
+    get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
+    store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
+)
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
 from src.explain import explain_item
+from src.views import build_ranked_display_items, build_homepage_data, build_debug_stats
 
 
 app = FastAPI()
+
+templates = Jinja2Templates(directory="templates")
 
 app.mount("/artifacts", StaticFiles(directory="artifacts"), name = "artifacts")
 
 #Register middleware
 app.middleware("http")(request_id_middleware)
 
-@app.get("/")
-def root():
-    return{"service": "news-digest-engine", "try": ["/health", "/docs"]}
+def render_ui_error(request: Request, status: int, message: str) -> HTMLResponse:
+    """Return HTML error for UI routes (not JSON)."""
+    return templates.TemplateResponse(
+        request,
+        "error.html",
+        {"status": status, "message": message},
+        status_code=status
+    )
+
+@app.get("/", response_class=HTMLResponse)
+def root(request: Request, page: int = 1):
+    """Home page with tabbed navigation."""
+    with db_conn() as conn:
+        data = build_homepage_data(conn, page=page, per_page=10)
+
+    return templates.TemplateResponse(
+        request,
+        "home.html",
+        {
+            "dates": data["dates"],
+            "runs": data["runs"],
+            "pagination": data["pagination"],
+        }
+    )
 
 @app.get("/health")
 def health(request: Request):
@@ -68,7 +106,7 @@ def ingest_raw(payload: IngestRequest, request: Request):
         finish_run_ok(conn, run_id, finished_at, after_dedupe=after_dedupe, inserted=inserted, duplicates=duplicates,)
 
     except Exception as exc:
-        finished_at = datetime.now(timezone.utc).isoformat
+        finished_at = datetime.now(timezone.utc).isoformat()
         try:
             finish_run_error(conn, run_id, finished_at, error_type=type(exc).__name__, error_message=str(exc))
 
@@ -89,12 +127,8 @@ def ingest_raw(payload: IngestRequest, request: Request):
 
 @app.get("/runs/latest")
 def latest_run():
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         latest = get_latest_run(conn)
-    finally:
-        conn.close()
 
     if latest is None:
         raise HTTPException(status_code=404, detail="No runs found")
@@ -114,14 +148,9 @@ def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
 
     now = datetime.fromisoformat(f"{date_str}T23:59:59+00:00")
 
-    conn = get_conn()
-    try:
-        init_db(conn)
+    with db_conn() as conn:
         items = get_news_items_by_date(conn, day=date_str)
 
-    finally:
-        conn.close()
-    
     ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
     return {
         "date": date_str,
@@ -137,7 +166,9 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
     try:
         day = date.fromisoformat(date_str).isoformat()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD")
+    except TypeError:
+        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD")
 
     if top_n < 1:
         raise HTTPException(status_code=400, detail="top_n must be >= 1")
@@ -145,95 +176,134 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
     now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
 
     # 2) DB reads
-    conn = get_conn()
-    try:
-        init_db(conn)
-
+    with db_conn() as conn:
         run = get_run_by_day(conn, day=day)
         items = get_news_items_by_date(conn, day=day)
 
-        # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
-        if run is None and not items:
-            raise HTTPException(status_code=404, detail="No data found for this day")
+    # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
+    if run is None and not items:
+        raise HTTPException(status_code=404, detail="No data found for this day")
 
-        # 3) rank + explain (use default config for now)
-        cfg = RankConfig()
-        ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
-        explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
+    # 3) rank + explain (use default config for now)
+    cfg = RankConfig()
+    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+    explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
 
-        # 4) render
-        html_text = render_digest_html(
-            day=day,
-            run=run,
-            ranked_items=ranked,
-            explanations=explanations,
-            cfg=cfg,
-            now=now,
-            top_n=top_n,
-        )
-        return HTMLResponse(content=html_text, status_code=200)
-
-    finally:
-        conn.close()
+    # 4) render
+    html_text = render_digest_html(
+        day=day,
+        run=run,
+        ranked_items=ranked,
+        explanations=explanations,
+        cfg=cfg,
+        now=now,
+        top_n=top_n,
+    )
+    return HTMLResponse(content=html_text, status_code=200)
 
 @app.get("/ui/date/{date_str}", response_class=HTMLResponse)
-def ui_for_date(date_str: str) -> HTMLResponse:
+def ui_date(request: Request, date_str: str, top_n: int = 10):
+    # Validate date
     try:
         day = date.fromisoformat(date_str).isoformat()
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid date format. Expected YYYY-MM-DD.")
+        return render_ui_error(request, 400, "Invalid date format. Expected YYYY-MM-DD.")
 
-    conn = get_conn()
-    try:
-        init_db(conn)
+    if top_n < 1:
+        return render_ui_error(request, 400, "top_n must be >= 1")
+
+    now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
+    cfg = RankConfig()
+
+    with db_conn() as conn:
+        items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
         run = get_run_by_day(conn, day=day)
-    finally:
-        conn.close()
 
-    digest_path = f"/artifacts/digest_{day}.html"
-    latest_path = "/runs/latest"
+        if not items_with_ids:
+            return render_ui_error(request, 404, f"No items found for {day}.")
 
-    debug_link = ""
-    if run is not None:
-        rid = run.get("run_id", "")
-        if rid:
-            debug_link = f'<div><a href="/debug/run/{rid}">Debug run {rid}</a></div>'
+        display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n)
 
-    html_text = f"""
-    <!doctype html>
-    <html>
-      <head><meta charset="utf-8"><title>UI {day}</title></head>
-      <body style="font-family: -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 24px;">
-        <h2>UI for {day}</h2>
-        <div><a href="{digest_path}">Open digest artifact</a></div>
-        <div><a href="{latest_path}">View latest run (JSON)</a></div>
-        {debug_link}
-      </body>
-    </html>
-    """
-    return HTMLResponse(content=html_text, status_code=200)
+    run_id = run.get("run_id") if run else None
 
+    return templates.TemplateResponse(
+        request,
+        "date.html",
+        {"day": day, "items": display_items, "count": len(display_items), "run": run, "run_id": run_id}
+    )
+
+@app.get("/ui/item/{item_id}", response_class=HTMLResponse)
+def ui_item(request: Request, item_id: int):
+    if item_id < 1:
+        return render_ui_error(request, 400, "item_id must be >= 1")
+
+    with db_conn() as conn:
+        result = get_news_item_by_id(conn, item_id=item_id)
+
+    if result is None:
+        return render_ui_error(request, 404, f"Item {item_id} not found.")
+
+    item, day = result
+    now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
+    cfg = RankConfig()
+    expl = explain_item(item, now=now, cfg=cfg)
+
+    return templates.TemplateResponse(
+        request,
+        "item.html",
+        {"item_id": item_id, "item": item, "expl": expl, "day": day}
+    )
 
 @app.get("/debug/run/{run_id}")
-def debug_run(run_id: str):
-    conn = get_conn()
-    try:
-        init_db(conn)
+def debug_run(run_id: str, request: Request):
+    request_id = request.state.request_id
+
+    with db_conn() as conn:
         run = get_run_by_id(conn, run_id=run_id)
-    finally:
-        conn.close()
+        failures_data = get_run_failures_with_sources(conn, run_id=run_id)
+        artifact_paths = get_run_artifacts(conn, run_id=run_id)
 
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     
     started_at = run.get("started_at", "") or ""
     day = started_at[:10] if len(started_at)>= 10 else ""
-    artifact_path = f"/artifacts/digest_{day}.html" if day else None
+    #Build counts dict
+    counts = {
+        "received": run.get("received"),
+        "after_dedupe": run.get("after_dedupe"),
+        "inserted": run.get("inserted"),
+        "duplicates": run.get("duplicates"),
+    }
 
-    out = dict(run)
-    out["artifact_path"] = artifact_path
-    return out
+    # Build LLM stats dict
+    cache_hits = run.get("llm_cache_hits", 0) or 0
+    cache_misses = run.get("llm_cache_misses", 0) or 0
+    total_calls = cache_hits + cache_misses
+    cache_hit_rate = round(cache_hits / total_calls * 100, 1) if total_calls > 0 else 0.0
 
+    llm_stats = {
+        "cache_hits": cache_hits,
+        "cache_misses": cache_misses,
+        "cache_hit_rate": cache_hit_rate,
+        "total_cost_usd": run.get("llm_total_cost_usd", 0.0) or 0.0,
+        "saved_cost_usd": run.get("llm_saved_cost_usd", 0.0) or 0.0,
+        "total_latency_ms": run.get("llm_total_latency_ms", 0) or 0,
+    }
+
+    return {
+        "run_id": run.get("run_id"),
+        "run_type": run.get("run_type"),
+        "status": run.get("status"),
+        "started_at": run.get("started_at"),
+        "finished_at": run.get("finished_at"),
+        "counts": counts,
+        "llm_stats": llm_stats,
+        "failures_by_code": failures_data["by_code"],
+        "failed_sources": failures_data["failed_sources"],
+        "artifact_paths": artifact_paths,
+        "request_id": request_id,
+    }
 
 
 @app.get("/debug/http_error")
@@ -245,6 +315,25 @@ def debug_http_error():
 def debug_crash():
     raise RuntimeError("boom")
 
+
+@app.get("/debug/stats")
+def debug_stats(request: Request):
+    """Database stats for operational debugging - scoped to last 10 dates."""
+    import os
+    request_id = request.state.request_id
+    db_path = os.environ.get("NEWS_DB_PATH", "./data/news.db")
+
+    with db_conn() as conn:
+        stats = build_debug_stats(conn, date_limit=10)
+
+    return {
+        "db_path": db_path,
+        "items_last_10_dates": stats["items_count"],
+        "runs_last_10_dates": stats["runs_count"],
+        "items_by_date": stats["items_by_date"],
+        "recent_runs": stats["recent_runs"],
+        "request_id": request_id,
+    }
 
 
 @app.exception_handler(HTTPException)
@@ -280,3 +369,177 @@ async def unhandled_exception_handler(request: Request, exc: Exception):
     resp = JSONResponse(status_code=500, content=payload.model_dump(exclude_none=True))
     resp.headers["X-Request-ID"] = rid
     return resp
+
+@app.post("/feedback/run")
+async def submit_run_feedback(
+    request: Request,
+    body: RunFeedbackRequest,
+    idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
+    """
+    Submit feedback for overall digest (1-5 star rating).
+    Submitting again for the same run_id UPDATES the existing feedback.
+    Supports idempotency: Include X-Idempotency-Key header for safe retries.
+    """
+    request_id = request.state.request_id
+    with db_conn() as conn:
+        # 1. Check idempotency key FIRST (prevents double-click duplicates)
+        if idempotency_key:
+            cached = get_idempotency_response(conn, key=idempotency_key)
+            if cached:
+                log_event("run_feedback_idempotency_hit",
+                    request_id=request_id,
+                    idempotency_key=idempotency_key
+                )
+                return JSONResponse(
+                    status_code=200,
+                    content=json.loads(cached["response_json"]),
+                    headers={"X-Request-ID": request_id}
+                )
+
+        # 2. Process: Upsert feedback (only if not cached)
+        now = datetime.now(timezone.utc).isoformat()
+        feedback_id = upsert_run_feedback(
+            conn,
+            run_id=body.run_id,
+            rating=body.rating,
+            comment=body.comment,
+            created_at=now,
+            updated_at=now,
+        )
+
+        response_data = {
+            "status": "saved",
+            "feedback_id": feedback_id,
+            "run_id": body.run_id,
+            "rating": body.rating,
+            "request_id": request_id,
+        }
+
+        # 3. Store idempotency key (after successful processing)
+        if idempotency_key:
+            store_idempotency_response(
+                conn,
+                key=idempotency_key,
+                endpoint="/feedback/run",
+                response_json=json.dumps(response_data),
+                created_at=now,
+            )
+
+        log_event("run_feedback_saved",
+            request_id=request_id,
+            feedback_id=feedback_id,
+            run_id=body.run_id,
+            rating=body.rating,
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content=response_data,
+            headers={"X-Request-ID": request_id}
+        )
+
+
+@app.post("/feedback/item")
+async def submit_item_feedback(
+    request: Request,
+    body: ItemFeedbackRequest,
+    idempotency_key: str | None = Header(None, alias="X-Idempotency-Key"),
+):
+    """
+    Submit feedback for a specific item (thumbs up/down).
+    Submitting again for the same (run_id, item_url) UPDATES the existing feedback.
+    Supports idempotency: Include X-Idempotency-Key header for safe retries.
+    """
+    request_id = request.state.request_id
+    with db_conn() as conn:
+        # Check idempotency key
+        if idempotency_key:
+            cached = get_idempotency_response(conn, key=idempotency_key)
+            if cached:
+                log_event("item_feedback_idempotency_hit",
+                    request_id=request_id,
+                    idempotency_key=idempotency_key
+                )
+                return JSONResponse(
+                    status_code=200,
+                    content=json.loads(cached["response_json"]),
+                    headers={"X-Request-ID": request_id}
+                )
+
+        # Upsert feedback (insert or update)
+        now = datetime.now(timezone.utc).isoformat()
+        useful_int = 1 if body.useful else 0
+        feedback_id = upsert_item_feedback(
+            conn,
+            run_id=body.run_id,
+            item_url=body.item_url,
+            useful=useful_int,
+            created_at=now,
+            updated_at=now,
+        )
+
+        response_data = {
+            "status": "saved",
+            "feedback_id": feedback_id,
+            "run_id": body.run_id,
+            "item_url": body.item_url,
+            "useful": body.useful,
+            "request_id": request_id,
+        }
+
+        # Store idempotency key
+        if idempotency_key:
+            store_idempotency_response(
+                conn,
+                key=idempotency_key,
+                endpoint="/feedback/item",
+                response_json=json.dumps(response_data),
+                created_at=now,
+            )
+
+        log_event("item_feedback_saved",
+            request_id=request_id,
+            feedback_id=feedback_id,
+            run_id=body.run_id,
+            item_url=body.item_url,
+            useful=body.useful,
+        )
+
+        return JSONResponse(
+            status_code=200,
+            content=response_data,
+            headers={"X-Request-ID": request_id}
+        )
+
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    """Return ProblemDetails for Pydantic validation errors."""
+    rid = request.state.request_id
+    run_id = getattr(request.state, "run_id", None)
+
+    # Extract first error for a clean message
+    errors = exc.errors()
+    if errors:
+        first = errors[0]
+        loc = ".".join(str(x) for x in first.get("loc", []))  #e.g., "body.rating"
+        msg = first.get("msg", "Validation error")
+        message = f"{loc}: {msg}"
+    else:
+        message = "Validation error"
+    
+    payload = problem(
+        status=422,
+        code="validation_error",
+        message=message,
+        request_id=rid,
+        run_id=run_id,
+    )
+
+    log_event("validation_error", request_id=rid, message=message)
+    resp = JSONResponse(status_code=422, content=payload.model_dump(exclude_none=True))
+    resp.headers["X-Request-ID"] = rid
+    return resp
+    

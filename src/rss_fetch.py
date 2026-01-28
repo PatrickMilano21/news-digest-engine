@@ -1,6 +1,10 @@
 # Enable type hint syntax from future Python versions (allows using | for union types)
 from __future__ import annotations
 
+from dataclasses import dataclass
+
+from src.error_codes import FETCH_TIMEOUT, FETCH_TRANSIENT, RATE_LIMITED, FETCH_PERMANENT
+
 # Import time module for sleep/delay functionality
 import time
 # Import urllib modules for making HTTP requests
@@ -10,7 +14,14 @@ import urllib.error
 
 # Custom exception class for RSS fetching errors - used throughout the module for consistent error handling
 class RSSFetchError(Exception):
-    """Raised when RSS cannot be fetched (maps to RSS_FETCH_FAIL)."""
+    """Raised when RSS cannot be fetched (used internally by fetch_rss)."""
+
+@dataclass
+class FetchResult:
+    ok: bool
+    content: str | None = None
+    error_code: str | None = None
+    error_message: str | None = None
 
 
 # Fetch RSS XML content from a URL - this is the base function without retries
@@ -52,42 +63,42 @@ def fetch_rss(url: str, *, timeout_s: float = 10.0) -> str:
 def fetch_rss_with_retry(url: str,*,attempts: int = 3,base_sleep_s: float = 0.5,timeout_s: float = 10.0,) -> str:
     """Fetch RSS with retry/backoff for transient failures."""
     # Track the last exception in case we exhaust all retries
-    last_exc: RSSFetchError | None = None
-
+    last_msg: str | None = None
+    
     # Loop through the specified number of attempts
     for i in range(attempts):
         try:
             # Try to fetch the RSS using the base function
-            return fetch_rss(url, timeout_s=timeout_s)
+            content = fetch_rss(url, timeout_s=timeout_s)
+            return FetchResult(ok=True, content=content)
+
         except RSSFetchError as exc:
             # If fetch fails, save the exception for later use
-            last_exc = exc
+            last_msg = str(exc)
+            #Classify the error
+            is_timeout = "timeout" in last_msg.lower()
+            is_429 = "HTTP 429" in last_msg
+            is_5xx = any(f"HTTP {c}" in last_msg for c in range (500, 512))
+            is_4xx = any(f"HTTP {c}" in last_msg for c in range (400, 500)) and not is_429
 
-            # Convert exception to string to check error type
-            msg = str(exc)
-            # Check if this is a 429 (Too Many Requests) error - these are usually transient
-            is_429 = "HTTP 429" in msg
-            # Check if this is a 5xx server error - these are usually transient server issues
-            is_5xx = any(
-                f"HTTP {code}" in msg
-                for code in (
-                    "500", "501", "502", "503", "504", "505",
-                    "506", "507", "508", "509", "510", "511",
-                )
-            )
-
-            # Decide if we should retry: only retry 429/5xx errors AND if we haven't used all attempts yet
-            should_retry = (is_429 or is_5xx) and (i < attempts - 1)
-            # If we shouldn't retry (e.g., 4xx client error or last attempt), raise the exception immediately
+            #429: dont retry aggressively, return immediately
+            if is_429:
+                return FetchResult(ok=False, error_code=RATE_LIMITED, error_message=last_msg)
+            # 4xx (non-429): permanent failure, no retry
+            if is_4xx:
+                return FetchResult(ok=False, error_code=FETCH_PERMANENT, error_message=last_msg)
+            # timeout or 5xx: retry if attempts remain
+            should_retry = (is_timeout or is_5xx) and (i< attempts - 1)
             if not should_retry:
-                raise exc
+                # Exhausted retries
+                if is_timeout:
+                    return FetchResult(ok=False, error_code=FETCH_TIMEOUT, error_message=last_msg)
+                else:
+                    return FetchResult(ok=False, error_code=FETCH_TRANSIENT, error_message=last_msg)       
 
-            # Sleep before retrying using exponential backoff: base_sleep * 2^attempt_number
-            # This means: 0.5s, 1.0s, 2.0s, 4.0s, etc. - each retry waits longer
-            time.sleep(base_sleep_s * (2**i))
+            # Backoff before retry
+            time.sleep(base_sleep_s * (2 ** i))
 
-    # If we've exhausted all attempts and have an exception, raise it
-    if last_exc is not None:
-        raise last_exc
-    # Fallback error if somehow we got here without an exception (shouldn't happen)
-    raise RSSFetchError("RSS_FETCH_FAIL: unknown")
+    # Fallback (shouldn't reach here)
+    return FetchResult(ok=False, error_code=FETCH_TRANSIENT, error_message=last_msg or "unknown")
+        

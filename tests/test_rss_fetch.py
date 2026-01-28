@@ -11,7 +11,7 @@ from src.rss_fetch import (
     fetch_rss,
     fetch_rss_with_retry,
 )
-
+from src.error_codes import RATE_LIMITED, FETCH_TRANSIENT
 
 # ---------- helpers ----------
 
@@ -66,39 +66,42 @@ def test_fetch_rss_non_200_raises(monkeypatch):
 
 
 # Test that fetch_rss_with_retry successfully retries after a 429 error
-def test_fetch_rss_with_retry_429_then_success(monkeypatch):
+def test_fetch_rss_with_retry_429_returns_rate_limited(monkeypatch):
     # Dictionary to track how many times our fake function was called
     calls = {"n": 0}
 
     # Fake function that fails on first call (429 error) but succeeds on second call
     def fake_fetch(url, *, timeout_s):
         calls["n"] += 1
-        if calls["n"] == 1:
-            raise RSSFetchError("RSS_FETCH_FAIL: HTTP 429")
-        return "<rss>ok</rss>"
-
     # Replace the actual fetch_rss function with our fake version
     monkeypatch.setattr("src.rss_fetch.fetch_rss", fake_fetch)
 
+    result = fetch_rss_with_retry("https://example.com/feed.xml", attempts=3)
     # Call fetch_rss_with_retry and verify it succeeds after retry
-    out = fetch_rss_with_retry("https://example.com/feed.xml", attempts=3)
-    assert out == "<rss>ok</rss>"
-    # Verify it was called twice: once that failed, once that succeeded
-    assert calls["n"] == 2
+    assert result.ok is False
+    assert result.error_code == RATE_LIMITED
+    assert calls["n"] == 1 #No retries for 429
+
 
 
 # Test that fetch_rss_with_retry raises error after exhausting all retry attempts
-def test_fetch_rss_with_retry_exhausted(monkeypatch):
-    # Fake function that always raises a 500 error (non-retryable after max attempts)
+def test_fetch_rss_with_retry_429_returns_rate_limited(monkeypatch):  
+    """429 returns RATE_LIMITED immediately (no retry)."""
+    calls = {"n": 0}
+
     def fake_fetch(url, *, timeout_s):
-        raise RSSFetchError("RSS_FETCH_FAIL: HTTP 500")
+        calls["n"] += 1
+        raise RSSFetchError("HTTP 429")
 
-    # Replace fetch_rss with our fake that always fails
-    monkeypatch.setattr("src.rss_fetch.fetch_rss", fake_fetch)
+    monkeypatch.setattr("src.rss_fetch.fetch_rss", fake_fetch)        
 
-    # Verify that after all retries are exhausted, it raises RSSFetchError
-    with pytest.raises(RSSFetchError):
-        fetch_rss_with_retry("https://example.com/feed.xml", attempts=3)
+    result = fetch_rss_with_retry("https://example.com/feed.xml",     
+attempts=3)
+
+    assert result.ok is False
+    assert result.error_code == RATE_LIMITED
+    assert calls["n"] == 1  # No retries for 429
+
 
 
 # Test that fetch_rss_with_retry uses exponential backoff (sleep time doubles each retry)
@@ -112,7 +115,7 @@ def test_fetch_rss_with_retry_backoff(monkeypatch):
     def fake_fetch(url, *, timeout_s):
         calls["n"] += 1
         if calls["n"] < 3:
-            raise RSSFetchError("RSS_FETCH_FAIL: HTTP 500")
+            raise RSSFetchError("HTTP 500")
         return "<rss>ok</rss>"
 
     # Fake sleep function that records how long we would have slept
@@ -124,13 +127,13 @@ def test_fetch_rss_with_retry_backoff(monkeypatch):
     monkeypatch.setattr(time, "sleep", fake_sleep)
 
     # Call fetch_rss_with_retry with base_sleep of 0.5 seconds
-    out = fetch_rss_with_retry(
+    result = fetch_rss_with_retry(
         "https://example.com/feed.xml",
         attempts=3,
         base_sleep_s=0.5,
     )
 
     # Verify it eventually succeeds
-    assert out == "<rss>ok</rss>"
-    # Verify exponential backoff: first sleep = 0.5 * 2^0 = 0.5, second sleep = 0.5 * 2^1 = 1.0
+    assert result.ok is True
+    assert result.content == "<rss>ok</rss>"
     assert sleeps == [0.5, 1.0]

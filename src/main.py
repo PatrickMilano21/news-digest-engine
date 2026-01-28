@@ -25,7 +25,7 @@ from src.repo import (
     get_run_failures_with_sources, get_run_artifacts,
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
-    get_distinct_dates,
+    get_distinct_dates, get_daily_spend, get_daily_refusal_counts,
 )
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
@@ -391,6 +391,45 @@ def debug_stats(request: Request):
         "runs_last_10_dates": stats["runs_count"],
         "items_by_date": stats["items_by_date"],
         "recent_runs": stats["recent_runs"],
+        "request_id": request_id,
+    }
+
+
+@app.get("/debug/costs")
+def debug_costs(request: Request, date: str | None = None):
+    """LLM cost stats for operational debugging.
+
+    Args:
+        date: Optional YYYY-MM-DD date. Defaults to today.
+
+    Returns:
+        Daily spend, cap, remaining budget, and refusal counts.
+    """
+    import os
+    from datetime import date as date_type
+
+    request_id = request.state.request_id
+
+    # Default to today if no date provided
+    if date is None:
+        date = date_type.today().isoformat()
+
+    # Get cap from env var (same default as llm_openai.py)
+    daily_cap = float(os.environ.get("LLM_DAILY_CAP_USD", "1.00"))
+
+    with db_conn() as conn:
+        daily_spend = get_daily_spend(conn, day=date)
+        refusal_counts = get_daily_refusal_counts(conn, day=date)
+
+    remaining = max(0.0, daily_cap - daily_spend)
+
+    return {
+        "date": date,
+        "daily_spend_usd": round(daily_spend, 6),
+        "daily_cap_usd": daily_cap,
+        "remaining_usd": round(remaining, 6),
+        "budget_exceeded": daily_spend >= daily_cap,
+        "refusal_counts": refusal_counts,
         "request_id": request_id,
     }
 

@@ -15,3 +15,4 @@ LLM_API_FAIL = "LLM_API_FAIL"          # Timeout, 429, network error
 LLM_DISABLED = "LLM_DISABLED"          # No API key configured
 NO_EVIDENCE = "NO_EVIDENCE"            # Stubbed for Day 16 grounding
 GROUNDING_FAIL = "GROUNDING_FAIL"      # Citation snippet not found in evidence
+COST_BUDGET_EXCEEDED = "COST_BUDGET_EXCEEDED"  # Daily LLM spend cap reached

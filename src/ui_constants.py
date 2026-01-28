@@ -45,8 +45,9 @@ class Colors:
 
 class Strings:
     """Shared UI strings."""
-    # Refusal message (must match exactly for consistency)
+    # Refusal messages (must match exactly for consistency)
     REFUSAL_MESSAGE = "Summary not generated — not enough source content"
+    REFUSAL_COST_EXCEEDED = "Summary skipped — daily processing limit reached"
 
     # Labels
     SUMMARY_LABEL = "Summary"

@@ -56,12 +56,18 @@ def render_summary_block(summary: SummaryResult | None) -> str:
         return ""
 
     if summary.refusal:
+        # Show appropriate message based on refusal type
+        if summary.refusal == "COST_BUDGET_EXCEEDED":
+            message = Strings.REFUSAL_COST_EXCEEDED
+        else:
+            message = Strings.REFUSAL_MESSAGE
+
         return f"""
         <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top: 12px;">
           <tr>
             <td style="background: {Colors.REFUSAL_BG}; border-left: 3px solid {Colors.REFUSAL_BORDER}; padding: 12px 14px; border-radius: 0 6px 6px 0;">
               <p style="margin: 0; color: {Colors.REFUSAL_TEXT}; font-size: 14px;">
-                {Strings.REFUSAL_MESSAGE}
+                {message}
               </p>
             </td>
           </tr>

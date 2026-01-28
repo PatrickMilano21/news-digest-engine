@@ -10,7 +10,9 @@ from src.schemas import NewsItem
 from src.llm_schemas.summary import SummaryResult, Citation
 from src.json_utils import safe_parse_json
 from src.logging_utils import log_event
-from src.error_codes import LLM_PARSE_FAIL, LLM_API_FAIL, LLM_DISABLED
+from src.error_codes import LLM_PARSE_FAIL, LLM_API_FAIL, LLM_DISABLED, COST_BUDGET_EXCEEDED
+from src.db import db_conn
+from src.repo import get_daily_spend
 
 
 #Config
@@ -21,6 +23,9 @@ MODEL = "gpt-4o-mini"
 #Cost estimates (per 1k tokens) - for logging only
 COST_PER_1K_PROMPT = 0.00015
 COST_PER_1K_COMPLETION = 0.0006
+
+# Daily spend cap (default $1.00, configurable via env var)
+LLM_DAILY_CAP_USD = float(os.environ.get("LLM_DAILY_CAP_USD", "1.00"))
 
 SYSTEM_PROMPT = """You are a news summarization assistant. Given a news item and evidence, produce a JSON object.       
 
@@ -46,17 +51,24 @@ If you cannot comply with all rules, return: {"refusal": "reason"}
 Respond with ONLY the JSON object. No markdown, no explanation, no preamble.
 """
 
-def summarize(item: NewsItem, evidence: str) -> tuple[SummaryResult, dict]:
+def summarize(item: NewsItem, evidence: str, *, day: str | None = None) -> tuple[SummaryResult, dict]:
     """
     Call OpenAI API and return a validated SummaryResult.
-    Contract: 
+    Contract:
     -ALWAYS returns SummaryResult (never raises)
     -Either (summary + citations) OR (refusal)
-    -Logs cost + latency on every call  
+    -Logs cost + latency on every call
+
+    Args:
+        item: NewsItem to summarize
+        evidence: Source evidence text
+        day: Optional YYYY-MM-DD date for budget checking. If provided and daily
+             spend exceeds LLM_DAILY_CAP_USD, returns COST_BUDGET_EXCEEDED refusal.
+
     Returns:
         tuple of (SummaryResult, usage_dict)
         usage_dict contains: prompt_tokens, completion_tokens, cost_usd, latency_ms
-    
+
     # NOTE: Returned as tuple to avoid polluting SummaryResult with operational concerns.
     # Can be refactored into a wrapper object later if needed.
     """
@@ -64,6 +76,14 @@ def summarize(item: NewsItem, evidence: str) -> tuple[SummaryResult, dict]:
     if not OPENAI_API_KEY:
         log_event("llm_disabled", reason="OPENAI_API_KEY not set")
         return _refuse(LLM_DISABLED)
+
+    # Check daily spend cap if day is provided
+    if day is not None:
+        with db_conn() as conn:
+            daily_spend = get_daily_spend(conn, day=day)
+        if daily_spend >= LLM_DAILY_CAP_USD:
+            log_event("llm_budget_exceeded", day=day, spend=daily_spend, cap=LLM_DAILY_CAP_USD)
+            return _refuse(COST_BUDGET_EXCEEDED)
     
     t0 = time.perf_counter()
 

@@ -207,7 +207,11 @@
     {% if d.summary %}
         {% if d.summary.refusal %}
         <div class="refusal-banner">
+            {% if d.summary.refusal == 'COST_BUDGET_EXCEEDED' %}
+            Summary skipped — daily processing limit reached
+            {% else %}
             Summary not generated — not enough source content
+            {% endif %}
         </div>
         {% else %}
         <div class="summary-box">

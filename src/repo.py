@@ -741,6 +741,48 @@ def get_recent_runs_summary(conn: sqlite3.Connection, *, limit: int = 10) -> lis
     ]
 
 
+def get_daily_spend(conn: sqlite3.Connection, *, day: str) -> float:
+    """Get total LLM spend for a day by aggregating from runs.
+
+    Args:
+        day: Date string in YYYY-MM-DD format
+
+    Returns:
+        Total spend in USD (0.0 if no runs exist)
+    """
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(llm_total_cost_usd), 0.0)
+        FROM runs
+        WHERE substr(started_at, 1, 10) = ?
+        """,
+        (day,),
+    ).fetchone()
+    return row[0] if row else 0.0
+
+
+def get_daily_refusal_counts(conn: sqlite3.Connection, *, day: str) -> dict[str, int]:
+    """Get refusal counts by error code for a day.
+
+    Args:
+        day: Date string in YYYY-MM-DD format
+
+    Returns:
+        Dict mapping error_code to count
+    """
+    rows = conn.execute(
+        """
+        SELECT rf.error_code, SUM(rf.count)
+        FROM run_failures rf
+        JOIN runs r ON rf.run_id = r.run_id
+        WHERE substr(r.started_at, 1, 10) = ?
+        GROUP BY rf.error_code
+        """,
+        (day,),
+    ).fetchall()
+    return {row[0]: row[1] for row in rows}
+
+
 def get_run_feedback(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
     """Get feedback for a run, if it exists."""
     cur = conn.execute(

@@ -26,7 +26,7 @@ from src.repo import (
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
     get_distinct_dates, get_daily_spend, get_daily_refusal_counts,
-    get_all_item_feedback_for_run,
+    get_all_item_feedback_for_run, get_active_source_weights,
 )
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
@@ -226,12 +226,14 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
         run = get_run_by_day(conn, day=day)
         items = get_news_items_by_date(conn, day=day)
 
-    # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
-    if run is None and not items:
-        raise HTTPException(status_code=404, detail="No data found for this day")
+        # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
+        if run is None and not items:
+            raise HTTPException(status_code=404, detail="No data found for this day")
 
-    # 3) rank + explain (use default config for now)
-    cfg = RankConfig()
+        # 3) rank + explain with dynamic weights (Milestone 3b)
+        source_weights = get_active_source_weights(conn)
+        cfg = RankConfig(source_weights=source_weights)
+
     ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
     explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
 
@@ -259,9 +261,12 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
         return render_ui_error(request, 400, "top_n must be >= 1")
 
     now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
-    cfg = RankConfig()
 
     with db_conn() as conn:
+        # Load dynamic source weights (Milestone 3b)
+        source_weights = get_active_source_weights(conn)
+        cfg = RankConfig(source_weights=source_weights)
+
         items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
         run = get_run_by_day(conn, day=day)
 
@@ -304,12 +309,16 @@ def ui_item(request: Request, item_id: int):
     with db_conn() as conn:
         result = get_news_item_by_id(conn, item_id=item_id)
 
-    if result is None:
-        return render_ui_error(request, 404, f"Item {item_id} not found.")
+        if result is None:
+            return render_ui_error(request, 404, f"Item {item_id} not found.")
 
-    item, day = result
-    now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
-    cfg = RankConfig()
+        item, day = result
+        now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
+
+        # Load dynamic source weights (Milestone 3b)
+        source_weights = get_active_source_weights(conn)
+        cfg = RankConfig(source_weights=source_weights)
+
     expl = explain_item(item, now=now, cfg=cfg)
 
     return templates.TemplateResponse(

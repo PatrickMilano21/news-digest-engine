@@ -1,0 +1,10 @@
+{
+  "description": "No feedback records - should result in no_feedback rejection",
+  "items": [],
+  "feedback": [],
+  "expected_rates": {},
+  "expected_result": {
+    "applied": false,
+    "rejected_reason": "no_feedback"
+  }
+}

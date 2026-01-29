@@ -12,18 +12,20 @@ class EvalCase:
     fixture_path: str
     source: str
     expected_titles: list[str]
-    top_n: int 
+    top_n: int
     cfg: RankConfig
+    use_item_source: bool = False  # If True, use <source> from XML items
 
 def load_cases() -> list[EvalCase]:
     fx_keyword = str(Path("fixtures") / "evals" / "case_keyword_boost.xml")
     fx_recency = str(Path("fixtures") / "evals" / "case_recency.xml")
     fx_title_vs_evidence = str(Path("fixtures") / "evals" / "case_title_vs_evidence.xml")
     fx_tie_break = str(Path("fixtures") / "evals" / "case_tie_break.xml")
+    fx_source_weight = str(Path("fixtures") / "evals" / "case_source_weight.xml")
 
     cases: list[EvalCase] = []
-    
-    def add(case_id: str, fixture_path: str, expected_titles: list[str], *, top_n: int, cfg: RankConfig) -> None:
+
+    def add(case_id: str, fixture_path: str, expected_titles: list[str], *, top_n: int, cfg: RankConfig, use_item_source: bool = False) -> None:
         cases.append(
             EvalCase(
                 case_id=case_id,
@@ -32,6 +34,7 @@ def load_cases() -> list[EvalCase]:
                 expected_titles=expected_titles,
                 top_n=top_n,
                 cfg=cfg,
+                use_item_source=use_item_source,
             )
         )
     # Group 1: keyword boost (relevance via title)
@@ -91,7 +94,33 @@ def load_cases() -> list[EvalCase]:
             cfg=RankConfig(search_fields=["title"]),
         )
 
-    # Group 5: Deliberately failing case (for debugging drill)
+    # Group 5: Source weight ordering (Milestone 3b)
+    # Tests that source_weights affect ranking when items are otherwise equal
+    # highweight=2.0 should rank above defaultweight=1.0 which ranks above lowweight=0.5
+    add(
+        "source_weight_high_beats_default",
+        fx_source_weight,
+        ["Article from HighWeight source", "Article from DefaultWeight source", "Article from LowWeight source"],
+        top_n=3,
+        cfg=RankConfig(
+            source_weights={"highweight": 2.0, "defaultweight": 1.0, "lowweight": 0.5},
+            search_fields=["title"],
+        ),
+        use_item_source=True,
+    )
+    add(
+        "source_weight_inverted",
+        fx_source_weight,
+        ["Article from LowWeight source", "Article from DefaultWeight source", "Article from HighWeight source"],
+        top_n=3,
+        cfg=RankConfig(
+            source_weights={"highweight": 0.5, "defaultweight": 1.0, "lowweight": 2.0},
+            search_fields=["title"],
+        ),
+        use_item_source=True,
+    )
+
+    # Group 6: Deliberately failing case (for debugging drill)
     # Uncomment to simulate eval failure:
     # add(
     #     "keyword_mismatch_deliberate_fail",
@@ -101,6 +130,6 @@ def load_cases() -> list[EvalCase]:
     #     cfg=RankConfig(keyword_boosts={"merger": 5.0}, search_fields=["title"]),
     # )
 
-    # Sanity: exactly 50
-    assert len(cases) == 50, f"expected 50 cases, got {len(cases)}"
+    # Sanity: exactly 52 (50 original + 2 source weight cases)
+    assert len(cases) == 52, f"expected 52 cases, got {len(cases)}"
     return cases

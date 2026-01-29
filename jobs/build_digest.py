@@ -17,6 +17,7 @@ from src.repo import (
     get_cached_summary,
     insert_cached_summary,
     update_run_llm_stats,
+    get_active_source_weights,
 )
 from src.scoring import RankConfig, rank_items
 from src.explain import explain_item
@@ -47,7 +48,9 @@ def main(argv: list[str] | None = None) -> int:
         run = get_run_by_day(conn, day=day)
         items = get_news_items_by_date(conn, day=day)
 
-        cfg = RankConfig()
+        # Load dynamic source weights (Milestone 3b)
+        source_weights = get_active_source_weights(conn)
+        cfg = RankConfig(source_weights=source_weights)
         ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
         explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
 

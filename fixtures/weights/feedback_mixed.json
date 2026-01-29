@@ -1,0 +1,49 @@
+{
+  "description": "Mixed feedback across 4 sources with varying usefulness rates",
+  "items": [
+    {"source": "TechCrunch", "url": "https://tc.com/1", "title": "TC Article 1"},
+    {"source": "TechCrunch", "url": "https://tc.com/2", "title": "TC Article 2"},
+    {"source": "TechCrunch", "url": "https://tc.com/3", "title": "TC Article 3"},
+    {"source": "TechCrunch", "url": "https://tc.com/4", "title": "TC Article 4"},
+    {"source": "TechCrunch", "url": "https://tc.com/5", "title": "TC Article 5"},
+    {"source": "TechCrunch", "url": "https://tc.com/6", "title": "TC Article 6"},
+    {"source": "HackerNews", "url": "https://hn.com/1", "title": "HN Article 1"},
+    {"source": "HackerNews", "url": "https://hn.com/2", "title": "HN Article 2"},
+    {"source": "HackerNews", "url": "https://hn.com/3", "title": "HN Article 3"},
+    {"source": "HackerNews", "url": "https://hn.com/4", "title": "HN Article 4"},
+    {"source": "HackerNews", "url": "https://hn.com/5", "title": "HN Article 5"},
+    {"source": "Reuters", "url": "https://reuters.com/1", "title": "Reuters Article 1"},
+    {"source": "Reuters", "url": "https://reuters.com/2", "title": "Reuters Article 2"},
+    {"source": "Reuters", "url": "https://reuters.com/3", "title": "Reuters Article 3"},
+    {"source": "Reuters", "url": "https://reuters.com/4", "title": "Reuters Article 4"},
+    {"source": "Reuters", "url": "https://reuters.com/5", "title": "Reuters Article 5"}
+  ],
+  "feedback": [
+    {"item_url": "https://tc.com/1", "useful": 1},
+    {"item_url": "https://tc.com/2", "useful": 1},
+    {"item_url": "https://tc.com/3", "useful": 1},
+    {"item_url": "https://tc.com/4", "useful": 1},
+    {"item_url": "https://tc.com/5", "useful": 1},
+    {"item_url": "https://tc.com/6", "useful": 0},
+    {"item_url": "https://hn.com/1", "useful": 1},
+    {"item_url": "https://hn.com/2", "useful": 0},
+    {"item_url": "https://hn.com/3", "useful": 1},
+    {"item_url": "https://hn.com/4", "useful": 0},
+    {"item_url": "https://hn.com/5", "useful": 0},
+    {"item_url": "https://reuters.com/1", "useful": 0},
+    {"item_url": "https://reuters.com/2", "useful": 0},
+    {"item_url": "https://reuters.com/3", "useful": 0},
+    {"item_url": "https://reuters.com/4", "useful": 1},
+    {"item_url": "https://reuters.com/5", "useful": 0}
+  ],
+  "expected_rates": {
+    "techcrunch": {"total": 6, "useful": 5, "rate": 0.833},
+    "hackernews": {"total": 5, "useful": 2, "rate": 0.4},
+    "reuters": {"total": 5, "useful": 1, "rate": 0.2}
+  },
+  "expected_adjustments": {
+    "techcrunch": "+0.1 (rate > 0.7)",
+    "hackernews": "no change (0.3 <= rate <= 0.7)",
+    "reuters": "-0.1 (rate < 0.3)"
+  }
+}

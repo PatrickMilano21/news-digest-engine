@@ -38,7 +38,7 @@ def run_eval_case(case, *, now) -> dict:
         }
 
     try:
-        items = parse_rss(xml, source=case.source)
+        items = parse_rss(xml, source=case.source, use_item_source=case.use_item_source)
     except Exception:
         return {
             "case_id": case.case_id,

@@ -187,6 +187,25 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # weight_snapshots table - source weight learning loop (Milestone 3b)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS weight_snapshots (
+            snapshot_id INTEGER PRIMARY KEY,
+            cycle_date TEXT NOT NULL,
+            user_id TEXT,
+            config_version INTEGER NOT NULL DEFAULT 1,
+            weights_before TEXT NOT NULL,
+            weights_after TEXT NOT NULL,
+            feedback_summary TEXT NOT NULL,
+            eval_pass_rate_before REAL,
+            eval_pass_rate_after REAL,
+            applied INTEGER NOT NULL DEFAULT 0,
+            rejected_reason TEXT,
+            created_at TEXT NOT NULL,
+            UNIQUE(cycle_date, user_id)
+        )
+    """)
+
     conn.commit()
 
     # Idempotent migration: add run_type column if missing (for existing DBs)

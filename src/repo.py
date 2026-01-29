@@ -881,3 +881,242 @@ def set_cached_tags(conn: sqlite3.Connection, *, item_id: int, tags: list[str]) 
     conn.commit()
 
 
+# --- Weight Learning Loop (Milestone 3b) ---
+
+def aggregate_feedback_by_source(
+    conn: sqlite3.Connection,
+    *,
+    as_of_date: str,
+    short_window_days: int = 7,
+    min_votes: int = 5,
+) -> dict:
+    """
+    Aggregate item feedback by source with blended rates.
+
+    Uses runs.started_at to define windows (aligns with when users saw items).
+
+    Args:
+        as_of_date: YYYY-MM-DD date to compute stats as of
+        short_window_days: Days for short-term rate (default 7)
+        min_votes: Minimum total votes to include source (default 5)
+
+    Returns:
+        Dict mapping source to stats dict with keys:
+        - total: total feedback count
+        - useful: useful feedback count
+        - rate_7d: useful rate in short window
+        - rate_longterm: useful rate all time
+        - effective_rate: blended rate (0.7 * rate_7d + 0.3 * rate_longterm)
+    """
+    # Calculate window start date
+    as_of = datetime.strptime(as_of_date, "%Y-%m-%d").date()
+    window_start = (as_of - timedelta(days=short_window_days)).isoformat()
+
+    # Query: join item_feedback → runs → news_items, group by source
+    # Get both all-time and 7-day stats in one query using conditional aggregation
+    rows = conn.execute(
+        """
+        SELECT
+            n.source,
+            COUNT(*) as total,
+            SUM(CASE WHEN f.useful = 1 THEN 1 ELSE 0 END) as useful,
+            SUM(CASE WHEN DATE(r.started_at) >= ? THEN 1 ELSE 0 END) as total_7d,
+            SUM(CASE WHEN DATE(r.started_at) >= ? AND f.useful = 1 THEN 1 ELSE 0 END) as useful_7d
+        FROM item_feedback f
+        JOIN runs r ON f.run_id = r.run_id
+        JOIN news_items n ON f.item_url = n.url
+        WHERE DATE(r.started_at) <= ?
+        GROUP BY n.source
+        HAVING COUNT(*) >= ?
+        """,
+        (window_start, window_start, as_of_date, min_votes),
+    ).fetchall()
+
+    result = {}
+    for source, total, useful, total_7d, useful_7d in rows:
+        rate_longterm = useful / total if total > 0 else 0.0
+        rate_7d = useful_7d / total_7d if total_7d > 0 else rate_longterm  # Fall back to longterm if no recent
+        effective_rate = 0.7 * rate_7d + 0.3 * rate_longterm
+
+        result[source.lower()] = {
+            "source": source,
+            "total": total,
+            "useful": useful,
+            "rate_7d": round(rate_7d, 4),
+            "rate_longterm": round(rate_longterm, 4),
+            "effective_rate": round(effective_rate, 4),
+        }
+
+    return result
+
+
+def get_active_source_weights(conn: sqlite3.Connection) -> dict[str, float]:
+    """
+    Load active source weights from the latest applied snapshot.
+
+    Merges snapshot weights over RankConfig defaults.
+    If no applied snapshot exists, returns defaults.
+
+    Returns:
+        Dict mapping source name (lowercase) to weight
+    """
+    from src.scoring import RankConfig
+
+    # Get defaults from RankConfig
+    defaults = RankConfig().source_weights.copy()
+
+    # Find latest applied snapshot
+    row = conn.execute(
+        """
+        SELECT weights_after
+        FROM weight_snapshots
+        WHERE applied = 1
+        ORDER BY cycle_date DESC, created_at DESC
+        LIMIT 1
+        """
+    ).fetchone()
+
+    if row is None:
+        return defaults
+
+    # Merge snapshot weights over defaults
+    try:
+        snapshot_weights = json.loads(row[0])
+        defaults.update(snapshot_weights)
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    return defaults
+
+
+def upsert_weight_snapshot(
+    conn: sqlite3.Connection,
+    *,
+    cycle_date: str,
+    weights_before: dict,
+    weights_after: dict,
+    feedback_summary: dict,
+    eval_before: float | None,
+    eval_after: float | None,
+    applied: bool,
+    rejected_reason: str | None = None,
+    user_id: str | None = None,
+) -> int:
+    """
+    Insert or replace a weight snapshot for (cycle_date, user_id).
+
+    When applied=False, weights_after should equal weights_before.
+
+    Args:
+        cycle_date: YYYY-MM-DD
+        weights_before: Current weights before update
+        weights_after: Proposed weights after update
+        feedback_summary: Aggregated feedback stats by source
+        eval_before: Baseline eval pass rate (0.0-1.0)
+        eval_after: Candidate eval pass rate (0.0-1.0)
+        applied: Whether the weights were applied
+        rejected_reason: Reason for rejection if applied=False
+        user_id: User ID (None for global weights)
+
+    Returns:
+        snapshot_id of the inserted/updated row
+    """
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    # SQLite treats NULL values as distinct for UNIQUE constraints,
+    # so ON CONFLICT won't trigger for rows with NULL user_id.
+    # We use explicit delete-then-insert for idempotency.
+    if user_id is None:
+        conn.execute(
+            "DELETE FROM weight_snapshots WHERE cycle_date = ? AND user_id IS NULL",
+            (cycle_date,),
+        )
+    else:
+        conn.execute(
+            "DELETE FROM weight_snapshots WHERE cycle_date = ? AND user_id = ?",
+            (cycle_date, user_id),
+        )
+
+    cur = conn.execute(
+        """
+        INSERT INTO weight_snapshots (
+            cycle_date, user_id, config_version,
+            weights_before, weights_after, feedback_summary,
+            eval_pass_rate_before, eval_pass_rate_after,
+            applied, rejected_reason, created_at
+        ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+        RETURNING snapshot_id
+        """,
+        (
+            cycle_date,
+            user_id,
+            json.dumps(weights_before),
+            json.dumps(weights_after),
+            json.dumps(feedback_summary),
+            eval_before,
+            eval_after,
+            1 if applied else 0,
+            rejected_reason,
+            created_at,
+        ),
+    )
+    row = cur.fetchone()
+    conn.commit()
+    return row[0]
+
+
+def get_weight_snapshot(conn: sqlite3.Connection, *, cycle_date: str, user_id: str | None = None) -> dict | None:
+    """
+    Get a specific weight snapshot by cycle_date and user_id.
+
+    Args:
+        cycle_date: YYYY-MM-DD
+        user_id: User ID (None for global weights)
+
+    Returns:
+        Snapshot dict or None if not found
+    """
+    if user_id is None:
+        row = conn.execute(
+            """
+            SELECT snapshot_id, cycle_date, user_id, config_version,
+                   weights_before, weights_after, feedback_summary,
+                   eval_pass_rate_before, eval_pass_rate_after,
+                   applied, rejected_reason, created_at
+            FROM weight_snapshots
+            WHERE cycle_date = ? AND user_id IS NULL
+            """,
+            (cycle_date,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT snapshot_id, cycle_date, user_id, config_version,
+                   weights_before, weights_after, feedback_summary,
+                   eval_pass_rate_before, eval_pass_rate_after,
+                   applied, rejected_reason, created_at
+            FROM weight_snapshots
+            WHERE cycle_date = ? AND user_id = ?
+            """,
+            (cycle_date, user_id),
+        ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "snapshot_id": row[0],
+        "cycle_date": row[1],
+        "user_id": row[2],
+        "config_version": row[3],
+        "weights_before": json.loads(row[4]),
+        "weights_after": json.loads(row[5]),
+        "feedback_summary": json.loads(row[6]),
+        "eval_pass_rate_before": row[7],
+        "eval_pass_rate_after": row[8],
+        "applied": bool(row[9]),
+        "rejected_reason": row[10],
+        "created_at": row[11],
+    }
+
+

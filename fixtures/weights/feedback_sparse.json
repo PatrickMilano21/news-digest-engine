@@ -1,0 +1,19 @@
+{
+  "description": "Sparse feedback - sources with < 5 votes each (should be excluded)",
+  "items": [
+    {"source": "SmallBlog", "url": "https://small.com/1", "title": "Small Article 1"},
+    {"source": "SmallBlog", "url": "https://small.com/2", "title": "Small Article 2"},
+    {"source": "SmallBlog", "url": "https://small.com/3", "title": "Small Article 3"},
+    {"source": "TinyNews", "url": "https://tiny.com/1", "title": "Tiny Article 1"},
+    {"source": "TinyNews", "url": "https://tiny.com/2", "title": "Tiny Article 2"}
+  ],
+  "feedback": [
+    {"item_url": "https://small.com/1", "useful": 1},
+    {"item_url": "https://small.com/2", "useful": 1},
+    {"item_url": "https://small.com/3", "useful": 0},
+    {"item_url": "https://tiny.com/1", "useful": 1},
+    {"item_url": "https://tiny.com/2", "useful": 0}
+  ],
+  "expected_rates": {},
+  "note": "Both sources have < 5 votes, so they should be excluded from aggregation"
+}

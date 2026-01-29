@@ -8,7 +8,7 @@ from evals.runner import run_all
 
 def test_load_cases_two_cases():
     cases = load_cases()
-    assert len(cases) == 50
+    assert len(cases) == 52  # 50 original + 2 source weight cases (Milestone 3b)
     for c in cases:
         assert c.case_id
         assert c.fixture_path
@@ -20,7 +20,7 @@ def test_load_cases_two_cases():
 def test_eval_cases_pass_with_fixed_now():
     now = datetime(2026, 1, 14, 23, 59, 59, tzinfo=timezone.utc)
     out = run_all(now=now)
-    assert out["total"] == 50
+    assert out["total"] == 52  # 50 original + 2 source weight cases (Milestone 3b)
     if out["failed"] != 0:
         failing = [r for r in out["results"] if not r["pass"]]
         first = failing[0]
@@ -28,5 +28,5 @@ def test_eval_cases_pass_with_fixed_now():
             f"failed={out['failed']} first_case={first['case_id']} "
             f"expected={first['expected_titles']} actual={first['actual_titles']}"
         )
-    assert out["passed"] == 50
+    assert out["passed"] == 52  # 50 original + 2 source weight cases (Milestone 3b)
 

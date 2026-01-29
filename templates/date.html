@@ -161,6 +161,85 @@
         color: #c62828;
     }
 
+    /* Feedback reason input */
+    .feedback-reason {
+        margin-top: 12px;
+        padding-top: 12px;
+        border-top: 1px solid var(--color-border-light);
+    }
+    .feedback-reason-label {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        display: block;
+        margin-bottom: 6px;
+    }
+    .feedback-reason-row {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+    }
+    .feedback-reason-input {
+        flex: 1;
+        padding: 8px 12px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-size: 14px;
+    }
+    .feedback-reason-input:focus {
+        outline: none;
+        border-color: var(--color-link);
+    }
+    .feedback-reason-submit {
+        padding: 8px 16px;
+        background: var(--color-link);
+        color: #fff;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+    }
+    .feedback-reason-submit:hover:not(:disabled) {
+        background: #1565c0;
+    }
+    .feedback-reason-submit:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+    .feedback-reason-saved {
+        color: #4caf50;
+        font-size: 13px;
+        display: none;
+    }
+    .feedback-reason-saved.show {
+        display: inline;
+    }
+
+    /* Suggestion chips */
+    .feedback-tags {
+        margin-top: 8px;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 6px;
+        align-items: center;
+    }
+    .feedback-tags-label {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+    }
+    .feedback-tag {
+        padding: 4px 10px;
+        background: #f0f4f8;
+        border: 1px solid #e0e4e8;
+        border-radius: 16px;
+        font-size: 13px;
+        cursor: pointer;
+        transition: all 0.15s;
+    }
+    .feedback-tag:hover {
+        background: #e3e7eb;
+        border-color: #ccc;
+    }
+
     /* Empty state */
     .empty-state {
         text-align: center;
@@ -235,11 +314,40 @@
     {% endif %}
 
     {% if run_id %}
-    <div class="feedback" data-item-url="{{ d.item.url }}">
+    {% set url_key = d.item.url|string %}
+    {% set existing_fb = item_feedback.get(url_key) %}
+    {% set has_useful = existing_fb and existing_fb.useful is not none %}
+    {% set has_reason = existing_fb and existing_fb.reason_tag %}
+
+    {# Useful/Not useful buttons - always visible #}
+    <div class="feedback" data-item-url="{{ url_key }}">
         <span class="feedback-label">Was this helpful?</span>
-        <button class="feedback-btn" data-useful="true" onclick="sendFeedback(this, true)">Useful</button>
-        <button class="feedback-btn" data-useful="false" onclick="sendFeedback(this, false)">Not useful</button>
+        <button class="feedback-btn {{ 'active-up' if has_useful and existing_fb.useful == 1 else '' }}" data-useful="true" onclick="sendFeedback(this, true)">Useful</button>
+        <button class="feedback-btn {{ 'active-down' if has_useful and existing_fb.useful == 0 else '' }}" data-useful="false" onclick="sendFeedback(this, false)">Not useful</button>
     </div>
+
+    {# Why? section - gated on reason_tag #}
+    {% if has_reason %}
+    <div class="feedback-thanks" style="margin-top: 12px; color: #4caf50; font-size: 14px;">
+        ✓ Thanks for your feedback!
+    </div>
+    {% else %}
+    <div class="feedback-reason" data-item-url="{{ url_key }}">
+        <label class="feedback-reason-label">Why? (optional)</label>
+        <div class="feedback-reason-row">
+            <input type="text" class="feedback-reason-input" placeholder="Type a reason or click a suggestion..." maxlength="100">
+            <button class="feedback-reason-submit" onclick="submitReason(this)" {{ '' if has_useful else 'disabled' }}>Submit</button>
+        </div>
+        {% if d.feedback_tags %}
+        <div class="feedback-tags">
+            <span class="feedback-tags-label">Suggestions:</span>
+            {% for tag in d.feedback_tags %}
+            <span class="feedback-tag" onclick="fillTag(this)">{{ tag }}</span>
+            {% endfor %}
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
     {% else %}
     <div class="feedback">
         <span class="feedback-label">Feedback available after daily processing</span>
@@ -260,6 +368,19 @@ const runId = "{{ run_id or '' }}";
 async function sendFeedback(btn, useful) {
     const container = btn.parentElement;
     const itemUrl = container.dataset.itemUrl;
+    const itemCard = container.closest('.item');
+    const submitBtn = itemCard.querySelector('.feedback-reason-submit');
+
+    // Optimistic UI update - change immediately
+    container.querySelectorAll('.feedback-btn').forEach(b => {
+        b.classList.remove('active-up', 'active-down');
+    });
+    btn.classList.add(useful ? 'active-up' : 'active-down');
+
+    // Enable Submit button now that Useful/Not useful is selected
+    if (submitBtn) {
+        submitBtn.disabled = false;
+    }
 
     try {
         const resp = await fetch('/feedback/item', {
@@ -272,14 +393,80 @@ async function sendFeedback(btn, useful) {
             })
         });
 
-        if (resp.ok) {
-            container.querySelectorAll('.feedback-btn').forEach(b => {
-                b.classList.remove('active-up', 'active-down');
-            });
-            btn.classList.add(useful ? 'active-up' : 'active-down');
+        if (!resp.ok) {
+            // Revert on error
+            btn.classList.remove('active-up', 'active-down');
+            if (submitBtn) submitBtn.disabled = true;
+            console.error('Feedback API error:', resp.status);
         }
     } catch (e) {
+        // Revert on error
+        btn.classList.remove('active-up', 'active-down');
+        if (submitBtn) submitBtn.disabled = true;
         console.error('Failed to send feedback:', e);
+    }
+}
+
+function fillTag(chip) {
+    const container = chip.closest('.feedback-reason');
+    const input = container.querySelector('.feedback-reason-input');
+    const currentVal = input.value.trim();
+    const newTag = chip.textContent.trim();
+
+    // Append with comma if there's already text
+    if (currentVal) {
+        input.value = currentVal + ', ' + newTag;
+    } else {
+        input.value = newTag;
+    }
+    input.focus();
+}
+
+async function submitReason(btn) {
+    const container = btn.closest('.feedback-reason');
+    const input = container.querySelector('.feedback-reason-input');
+    const itemUrl = container.dataset.itemUrl;
+    const reason = input.value.trim();
+    const itemCard = container.closest('.item');
+    const feedbackDiv = itemCard.querySelector('.feedback');
+
+    // Determine useful value from active button
+    const activeUp = feedbackDiv.querySelector('.feedback-btn.active-up');
+    const activeDown = feedbackDiv.querySelector('.feedback-btn.active-down');
+
+    // Hard-fail if neither button is active
+    if (!activeUp && !activeDown) {
+        console.error('Must select Useful or Not useful first');
+        return;
+    }
+
+    const useful = activeUp ? true : false;
+
+    if (!reason) return;
+
+    try {
+        const resp = await fetch('/feedback/item', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                run_id: runId,
+                item_url: itemUrl,
+                useful: useful,
+                reason_tag: reason
+            })
+        });
+
+        if (resp.ok) {
+            // Only hide the "Why?" section, create thanks message
+            container.style.display = 'none';
+            const thanks = document.createElement('div');
+            thanks.className = 'feedback-thanks';
+            thanks.style.cssText = 'margin-top: 12px; color: #4caf50; font-size: 14px;';
+            thanks.textContent = '✓ Thanks for your feedback!';
+            container.insertAdjacentElement('afterend', thanks);
+        }
+    } catch (e) {
+        console.error('Failed to submit reason:', e);
     }
 }
 </script>

@@ -15,6 +15,8 @@ from src.cache_utils import compute_cache_key
 from src.clients.llm_openai import MODEL
 from src.repo import (
     get_cached_summary,
+    get_cached_tags,
+    set_cached_tags,
     get_distinct_dates,
     count_distinct_dates,
     get_run_by_day,
@@ -26,6 +28,7 @@ from src.repo import (
 )
 from src.llm_schemas.summary import SummaryResult
 from src.schemas import NewsItem
+from src.clients.llm_openai import suggest_feedback_tags
 
 
 def build_ranked_display_items(
@@ -63,15 +66,39 @@ def build_ranked_display_items(
         expl = explain_item(item, now=now, cfg=cfg)
         summary = _fetch_cached_summary(conn, item)
 
+        # Fetch or generate feedback tags (on-demand + cached)
+        feedback_tags = _fetch_or_generate_tags(conn, db_id, item)
+
         display_items.append({
             "id": db_id,
             "item": item,
             "score": score,
             "expl": expl,
             "summary": summary,
+            "feedback_tags": feedback_tags,
         })
 
     return display_items
+
+
+def _fetch_or_generate_tags(conn, item_id: int, item: NewsItem) -> list[str]:
+    """Fetch cached feedback tags or generate new ones via LLM.
+
+    Uses hybrid approach: on-demand generation + cache in news_items.suggested_tags.
+    Falls back to ["Other"] if LLM fails.
+    """
+    # Check cache first
+    cached = get_cached_tags(conn, item_id=item_id)
+    if cached is not None:
+        return cached
+
+    # Generate via LLM (exempt from daily cap per design)
+    tags = suggest_feedback_tags(item)
+
+    # Cache for future use
+    set_cached_tags(conn, item_id=item_id, tags=tags)
+
+    return tags
 
 
 def _fetch_cached_summary(conn, item: NewsItem) -> SummaryResult | None:

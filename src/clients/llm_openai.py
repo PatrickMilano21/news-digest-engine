@@ -287,3 +287,125 @@ def _compute_cost(prompt_tokens: int, completion_tokens: int) -> float:
         completion_tokens / 1000 * COST_PER_1K_COMPLETION,
         6
     )
+
+
+# --- Feedback Tag Suggestion (Milestone 3a) ---
+
+# Basic blocklist for profanity/sensitive content
+_TAG_BLOCKLIST = {
+    # Profanity
+    "fuck", "shit", "damn", "ass", "bitch", "crap",
+    # Sensitive
+    "hate", "kill", "die", "racist", "sexist",
+}
+
+
+def _sanitize_tag(tag: str) -> str | None:
+    """Filter out profanity/sensitive tags. Returns None if blocked."""
+    tag_lower = tag.lower()
+    for blocked in _TAG_BLOCKLIST:
+        if blocked in tag_lower:
+            log_event("tag_blocked", tag=tag, reason="blocklist")
+            return None
+    return tag
+
+TAG_SUGGESTION_PROMPT = """Suggest 3-5 casual, conversational feedback reasons (1-4 words) for this article. Write like you're texting a friend about why you liked or didn't like it.
+
+Article:
+Title: {title}
+Source: {source}
+
+Be specific to THIS article. Use natural, relatable language. Mix positive and constructive.
+
+Examples of the vibe we want:
+- Tech: ["Finally explained well", "Too much hype", "Needed more examples", "Actually useful"]
+- Finance: ["Made me smarter", "Too jargon-heavy", "Great timing", "Where's the data?"]
+- Sports: ["What a game!", "Biased take", "Love the stats", "Clickbait title"]
+- Science: ["Mind = blown", "Too dumbed down", "Solid research", "Just an ad"]
+
+Return ONLY a JSON array. No markdown.
+"""
+
+
+def suggest_feedback_tags(item: NewsItem) -> list[str]:
+    """
+    Suggest 3-5 feedback tags for an item using LLM.
+
+    Contract:
+    - ALWAYS returns a list (never raises)
+    - Returns ["Other"] on any failure (API error, parse error, no API key)
+    - Exempt from daily cost cap (cheap call, separate concern)
+    - Tags are 1-2 words each, generic/reusable
+
+    Args:
+        item: NewsItem to generate tags for
+
+    Returns:
+        List of 3-5 tag strings, or ["Other"] on failure
+    """
+    if not OPENAI_API_KEY:
+        log_event("tag_suggestion_disabled", reason="OPENAI_API_KEY not set")
+        return ["Other"]
+
+    t0 = time.perf_counter()
+
+    try:
+        prompt = TAG_SUGGESTION_PROMPT.format(title=item.title, source=item.source)
+
+        payload = {
+            "model": MODEL,
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.3,  # Slight variation for diverse tags
+            "max_tokens": 100
+        }
+
+        req = urllib.request.Request(
+            OPENAI_URL,
+            data=json.dumps(payload).encode("utf-8"),
+            headers={
+                "Authorization": f"Bearer {OPENAI_API_KEY}",
+                "Content-Type": "application/json"
+            }
+        )
+
+        with urllib.request.urlopen(req, timeout=15.0) as resp:
+            body = json.loads(resp.read().decode("utf-8"))
+
+        content = body["choices"][0]["message"]["content"]
+        usage = body.get("usage", {})
+
+        # Parse JSON array
+        tags = safe_parse_json(content)
+
+        if not isinstance(tags, list) or len(tags) < 1:
+            log_event("tag_suggestion_parse_fail", raw=content)
+            return ["Other"]
+
+        # Validate: all items are strings, 1-4 words, limit to 5
+        # Also filter out profanity/sensitive content
+        valid_tags = []
+        for tag in tags[:5]:
+            if isinstance(tag, str) and 1 <= len(tag.split()) <= 4:
+                cleaned = _sanitize_tag(tag.strip())
+                if cleaned:
+                    valid_tags.append(cleaned)
+
+        if len(valid_tags) < 1:
+            log_event("tag_suggestion_validation_fail", tags=tags)
+            return ["Other"]
+
+        latency = _elapsed_ms(t0)
+        cost = _compute_cost(usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0))
+
+        log_event("tag_suggestion_ok",
+            model=MODEL,
+            tags=valid_tags,
+            latency_ms=latency,
+            cost_usd=cost
+        )
+
+        return valid_tags
+
+    except Exception as exc:
+        log_event("tag_suggestion_error", error=str(exc), latency_ms=_elapsed_ms(t0))
+        return ["Other"]

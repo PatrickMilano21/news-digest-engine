@@ -1,5 +1,9 @@
 from __future__ import annotations
 
+# Load .env before other imports that use env vars
+from dotenv import load_dotenv
+load_dotenv()
+
 import argparse
 import json
 import os

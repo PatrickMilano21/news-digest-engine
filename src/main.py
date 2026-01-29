@@ -26,6 +26,7 @@ from src.repo import (
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
     get_distinct_dates, get_daily_spend, get_daily_refusal_counts,
+    get_all_item_feedback_for_run,
 )
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
@@ -269,7 +270,11 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
 
         display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n)
 
-    run_id = run.get("run_id") if run else None
+        # Get existing feedback for this run
+        run_id = run.get("run_id") if run else None
+        item_feedback = {}
+        if run_id:
+            item_feedback = get_all_item_feedback_for_run(conn, run_id=run_id)
 
     # Format run timestamp for display (customer-safe)
     run_status = None
@@ -288,7 +293,7 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
     return templates.TemplateResponse(
         request,
         "date.html",
-        {"day": day, "items": display_items, "count": len(display_items), "run": run, "run_id": run_id, "run_status": run_status}
+        {"day": day, "items": display_items, "count": len(display_items), "run": run, "run_id": run_id, "run_status": run_status, "item_feedback": item_feedback}
     )
 
 @app.get("/ui/item/{item_id}", response_class=HTMLResponse)
@@ -573,6 +578,7 @@ async def submit_item_feedback(
             run_id=body.run_id,
             item_url=body.item_url,
             useful=useful_int,
+            reason_tag=body.reason_tag,
             created_at=now,
             updated_at=now,
         )
@@ -583,6 +589,7 @@ async def submit_item_feedback(
             "run_id": body.run_id,
             "item_url": body.item_url,
             "useful": body.useful,
+            "reason_tag": body.reason_tag,
             "request_id": request_id,
         }
 

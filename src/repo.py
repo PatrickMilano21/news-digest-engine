@@ -629,7 +629,7 @@ def upsert_run_feedback(conn: sqlite3.Connection, *, run_id: str, rating: int, c
 
 
 def upsert_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str, useful: int,
-                         created_at: str, updated_at: str) -> int:
+                         created_at: str, updated_at: str, reason_tag: str | None = None) -> int:
     """
     Insert or update feedback for a specific item in a run.
 
@@ -638,18 +638,20 @@ def upsert_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str
 
     Args:
         useful: 1 = useful (thumbs up), 0 = not useful (thumbs down)
+        reason_tag: Optional user-selected feedback reason tag (Milestone 3a)
 
     Returns:
         feedback_id of the inserted/updated row
     """
     cur = conn.execute(
-        """INSERT INTO item_feedback (run_id, item_url, useful, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?)
+        """INSERT INTO item_feedback (run_id, item_url, useful, reason_tag, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?)
            ON CONFLICT(run_id, item_url) DO UPDATE SET
                useful = excluded.useful,
+               reason_tag = excluded.reason_tag,
                updated_at = excluded.updated_at
            RETURNING feedback_id""",
-        (run_id, item_url, useful, created_at, updated_at)
+        (run_id, item_url, useful, reason_tag, created_at, updated_at)
     )
     row = cur.fetchone()
     conn.commit()
@@ -806,7 +808,7 @@ def get_run_feedback(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
 def get_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str) -> dict | None:
     """Get feedback for a specific item in a run, if it exists."""
     cur = conn.execute(
-        """SELECT feedback_id, run_id, item_url, useful, created_at, updated_at
+        """SELECT feedback_id, run_id, item_url, useful, reason_tag, created_at, updated_at
            FROM item_feedback WHERE run_id = ? AND item_url = ?""",
         (run_id, item_url)
     )
@@ -818,8 +820,64 @@ def get_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str) -
         "run_id": row[1],
         "item_url": row[2],
         "useful": row[3],
-        "created_at": row[4],
-        "updated_at": row[5],
+        "reason_tag": row[4],
+        "created_at": row[5],
+        "updated_at": row[6],
     }
+
+
+def get_all_item_feedback_for_run(conn: sqlite3.Connection, *, run_id: str) -> dict[str, dict]:
+    """Get all item feedback for a run, keyed by item_url."""
+    cur = conn.execute(
+        """SELECT item_url, useful, reason_tag FROM item_feedback WHERE run_id = ?""",
+        (run_id,)
+    )
+    return {
+        row[0]: {"useful": row[1], "reason_tag": row[2]}
+        for row in cur.fetchall()
+    }
+
+
+# --- Feedback Tag Caching (Milestone 3a) ---
+
+def get_cached_tags(conn: sqlite3.Connection, *, item_id: int) -> list[str] | None:
+    """
+    Get cached suggested tags for an item.
+
+    Args:
+        item_id: Database ID of the news_item
+
+    Returns:
+        List of tag strings if cached, None if not cached
+    """
+    row = conn.execute(
+        "SELECT suggested_tags FROM news_items WHERE id = ?",
+        (item_id,)
+    ).fetchone()
+
+    if row is None or row[0] is None:
+        return None
+
+    try:
+        tags = json.loads(row[0])
+        return tags if isinstance(tags, list) else None
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def set_cached_tags(conn: sqlite3.Connection, *, item_id: int, tags: list[str]) -> None:
+    """
+    Cache suggested tags for an item.
+
+    Args:
+        item_id: Database ID of the news_item
+        tags: List of tag strings to cache
+    """
+    tags_json = json.dumps(tags)
+    conn.execute(
+        "UPDATE news_items SET suggested_tags = ? WHERE id = ?",
+        (tags_json, item_id)
+    )
+    conn.commit()
 
 

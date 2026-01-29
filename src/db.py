@@ -210,3 +210,15 @@ def init_db(conn: sqlite3.Connection) -> None:
     if "failed_sources" not in cols:
         conn.execute("ALTER TABLE run_failures ADD COLUMN failed_sources TEXT;")
         conn.commit()
+
+    # Idempotent migration: add suggested_tags column to news_items (Milestone 3a)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(news_items);").fetchall()]
+    if "suggested_tags" not in cols:
+        conn.execute("ALTER TABLE news_items ADD COLUMN suggested_tags TEXT;")
+        conn.commit()
+
+    # Idempotent migration: add reason_tag column to item_feedback (Milestone 3a)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(item_feedback);").fetchall()]
+    if "reason_tag" not in cols:
+        conn.execute("ALTER TABLE item_feedback ADD COLUMN reason_tag TEXT;")
+        conn.commit()

@@ -29,4 +29,5 @@ class ItemFeedbackRequest(BaseModel):
     run_id: str
     item_url: str
     useful: bool  # True = thumbs up, False = thumbs down
+    reason_tag: str | None = None  # Optional user-selected feedback reason (Milestone 3a)
     

@@ -69,11 +69,43 @@ def main() -> int:
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
     p.add_argument("--mode", default="fixtures", choices=["fixtures", "prod"])
     p.add_argument("--force", action="store_true", help="Override idempotency check")
+    p.add_argument("--user-id", help="Run for specific user (Milestone 4)")
+    p.add_argument("--all-users", action="store_true", help="Run for all users (Milestone 4)")
     args = p.parse_args()
 
     # Validate date
     date.fromisoformat(args.date)
     day = args.date
+    user_id = args.user_id
+
+    # Handle --all-users mode
+    if args.all_users:
+        from src.repo import get_all_users
+        conn = get_conn()
+        try:
+            init_db(conn)
+            users = get_all_users(conn)
+        finally:
+            conn.close()
+
+        if not users:
+            print("NO_USERS: No users found in database")
+            return 0
+
+        exit_code = 0
+        for user in users:
+            print(f"Running for user {user['email']} ({user['user_id']})")
+            result = run_for_user(day, args.mode, args.force, user["user_id"])
+            if result != 0:
+                exit_code = result
+        return exit_code
+
+    # Single user or global run
+    return run_for_user(day, args.mode, args.force, user_id)
+
+
+def run_for_user(day: str, mode: str, force: bool, user_id: str | None) -> int:
+    """Run the daily pipeline for a specific user (or globally if user_id is None)."""
 
     failures: dict[str, int] = {}
     failed_sources: dict[str, list[str]] = {}  # {error_code: [path_or_url, ...]}
@@ -87,12 +119,12 @@ def main() -> int:
 
         # Idempotency: skip if already have successful run for this day
         existing_run = get_run_by_day(conn, day=day)
-        if existing_run and not args.force:
+        if existing_run and not force:
             run_id = uuid.uuid4().hex
             log_event("daily_run_skipped", run_id=run_id, day=day, reason="already_ok")
             print(f"SKIP day={day} reason=already_ok (use --force to override)")
             return 0
-        if existing_run and args.force:
+        if existing_run and force:
             log_event("daily_run_force", day=day, existing_run_id=existing_run["run_id"])
             print(f"FORCE day={day} overriding existing run")
 
@@ -100,19 +132,19 @@ def main() -> int:
         run_id = uuid.uuid4().hex
         t0 = time.perf_counter()
         now = datetime.now(timezone.utc)
-        log_event("daily_run_started", run_id=run_id, day=day, mode=args.mode)
+        log_event("daily_run_started", run_id=run_id, day=day, mode=mode)
 
         run_day = date.fromisoformat(day)
         started_at = datetime.combine(run_day, now.time(), tzinfo=timezone.utc).isoformat()
-        start_run(conn, run_id=run_id, started_at=started_at, received=0)
-        write_audit_log(conn, event_type="RUN_STARTED", ts=started_at, run_id=run_id, day=day, details={})
+        start_run(conn, run_id=run_id, started_at=started_at, received=0, user_id=user_id)
+        write_audit_log(conn, event_type="RUN_STARTED", ts=started_at, run_id=run_id, day=day, details={"user_id": user_id})
 
         # =====================================================================
         # Stage 1: INGEST
         # =====================================================================
         all_items = []
 
-        if args.mode == "fixtures":
+        if mode == "fixtures":
             # Load from local fixture files
             for feed in FIXTURE_FEEDS:
                 path = feed["path"]
@@ -175,8 +207,8 @@ def main() -> int:
 
         # Early exit if no items received
         if received == 0:
-            log_event("daily_run_no_items", run_id=run_id, day=day, mode=args.mode)
-            print(f"NO_ITEMS day={day} mode={args.mode} (no items received from feeds)")
+            log_event("daily_run_no_items", run_id=run_id, day=day, mode=mode)
+            print(f"NO_ITEMS day={day} mode={mode} (no items received from feeds)")
             # Still finish the run so we have a record
             finished_at = datetime.now(timezone.utc).isoformat()
             finish_run_ok(conn, run_id=run_id, finished_at=finished_at, after_dedupe=0, inserted=0, duplicates=0)
@@ -208,14 +240,14 @@ def main() -> int:
         # =====================================================================
         ranked = []
         explanations = []
-        # Load dynamic source weights (Milestone 3b)
-        source_weights = get_active_source_weights(conn)
+        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
+        source_weights = get_active_source_weights(conn, user_id=user_id)
         cfg = RankConfig(source_weights=source_weights)
         try:
             # Compute ai_scores (Milestone 3c)
             # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
             corpus = get_all_historical_items(conn, as_of_date=day)
-            positives = get_positive_feedback_items(conn, as_of_date=day)
+            positives = get_positive_feedback_items(conn, as_of_date=day, user_id=user_id)
             model = build_tfidf_model(corpus) if corpus else None
             item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in deduped]
             scores = compute_ai_scores(model, positives, item_dicts)
@@ -478,7 +510,7 @@ def main() -> int:
                 day=day,
                 details={"error_type": error_type, "error_message": str(exc)}
             )
-        except:
+        except Exception:
             pass
         elapsed_ms = int((time.perf_counter() - t0) * 1000) if t0 else 0
         log_event(

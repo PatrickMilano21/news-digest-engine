@@ -1,6 +1,4 @@
 """Tests for LLM cost cap functionality (Milestone 2)."""
-import os
-from datetime import datetime, timezone
 
 import pytest
 
@@ -143,6 +141,7 @@ class TestDebugCostsEndpoint:
         from fastapi.testclient import TestClient
         from src.main import app
         from src.db import get_conn, init_db
+        from tests.conftest import create_admin_session
 
         db_file = tmp_path / "test.db"
         monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
@@ -162,6 +161,7 @@ class TestDebugCostsEndpoint:
         conn.close()
 
         client = TestClient(app)
+        client = create_admin_session(client)
         resp = client.get("/debug/costs?date=2026-01-28")
 
         assert resp.status_code == 200
@@ -177,6 +177,7 @@ class TestDebugCostsEndpoint:
         from fastapi.testclient import TestClient
         from src.main import app
         from src.db import get_conn, init_db
+        from tests.conftest import create_admin_session
 
         db_file = tmp_path / "test.db"
         monkeypatch.setenv("NEWS_DB_PATH", str(db_file))
@@ -196,6 +197,7 @@ class TestDebugCostsEndpoint:
         conn.close()
 
         client = TestClient(app)
+        client = create_admin_session(client)
         resp = client.get("/debug/costs?date=2026-01-28")
 
         assert resp.status_code == 200

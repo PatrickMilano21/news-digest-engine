@@ -28,7 +28,10 @@ from src.repo import (
     get_distinct_dates, get_daily_spend, get_daily_refusal_counts,
     get_all_item_feedback_for_run, get_active_source_weights,
     get_positive_feedback_items, get_all_historical_items,
+    create_user, get_user_by_email, get_user_by_id,
+    create_session, get_session, delete_session, update_user_last_login,
 )
+from src.auth import hash_password, verify_password
 from src.ai_score import build_tfidf_model, compute_ai_scores
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
@@ -55,16 +58,164 @@ def render_ui_error(request: Request, status: int, message: str) -> HTMLResponse
         status_code=status
     )
 
+
+# --- Session Middleware (Milestone 4) ---
+
+def get_current_user(request: Request, conn) -> dict | None:
+    """
+    Extract user from session cookie.
+
+    Returns:
+        User dict or None if not logged in or session expired.
+    """
+    session_id = request.cookies.get("session_id")
+    if not session_id:
+        return None
+
+    session = get_session(conn, session_id=session_id)
+    if not session:
+        return None
+
+    return get_user_by_id(conn, user_id=session["user_id"])
+
+
+def require_admin(request: Request, conn) -> dict:
+    """
+    Require admin role for access.
+
+    Returns:
+        User dict if admin.
+
+    Raises:
+        HTTPException 401 if not logged in.
+        HTTPException 403 if not admin.
+    """
+    user = get_current_user(request, conn)
+    if not user:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if user.get("role") != "admin":
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return user
+
+
+# --- Auth Endpoints (Milestone 4) ---
+
+@app.post("/auth/register")
+def auth_register(request: Request, email: str, password: str):
+    """
+    Register a new user (admin-only, invite-based system).
+
+    Requires admin session to create new users.
+    """
+    with db_conn() as conn:
+        # Require admin for user creation (invite-only system)
+        require_admin(request, conn)
+
+        # Check if email already exists
+        existing = get_user_by_email(conn, email=email)
+        if existing:
+            raise HTTPException(status_code=409, detail="Email already registered")
+
+        # Hash password and create user
+        password_hash = hash_password(password)
+        user_id = create_user(conn, email=email, password_hash=password_hash, role="user")
+
+    return {"status": "created", "user_id": user_id, "email": email}
+
+
+@app.post("/auth/login")
+def auth_login(request: Request, email: str, password: str):
+    """
+    Log in with email and password.
+
+    Sets session cookie on success.
+    """
+    with db_conn() as conn:
+        user = get_user_by_email(conn, email=email)
+        if not user:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        if not user.get("password_hash"):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        if not verify_password(password, user["password_hash"]):
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+
+        # Create session and update last login
+        session_id = create_session(conn, user_id=user["user_id"], expires_hours=24)
+        update_user_last_login(conn, user_id=user["user_id"])
+
+    # Set cookie and return success
+    response = JSONResponse(content={
+        "status": "logged_in",
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "role": user["role"],
+    })
+    response.set_cookie(
+        key="session_id",
+        value=session_id,
+        httponly=True,
+        samesite="lax",
+        max_age=24 * 60 * 60,  # 24 hours
+    )
+    return response
+
+
+@app.post("/auth/logout")
+def auth_logout(request: Request):
+    """
+    Log out (invalidate session).
+
+    Clears session cookie.
+    """
+    session_id = request.cookies.get("session_id")
+
+    if session_id:
+        with db_conn() as conn:
+            delete_session(conn, session_id=session_id)
+
+    response = JSONResponse(content={"status": "logged_out"})
+    response.delete_cookie(key="session_id")
+    return response
+
+
+@app.get("/auth/me")
+def auth_me(request: Request):
+    """
+    Get current user info.
+
+    Returns user info if logged in, 401 if not.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+
+    if not user:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    return {
+        "user_id": user["user_id"],
+        "email": user["email"],
+        "role": user["role"],
+    }
+
+
 @app.get("/")
 def root(request: Request):
-    """Redirect to most recent digest (customer landing page)."""
+    """Redirect to user's most recent digest (customer landing page)."""
     with db_conn() as conn:
-        dates = get_distinct_dates(conn, limit=1)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
 
-    if dates:
-        return RedirectResponse(url=f"/ui/date/{dates[0]}", status_code=302)
+        # Get latest run for this user
+        latest_run = get_latest_run(conn, user_id=user_id)
 
-    # No data yet - show welcome page
+    if latest_run and latest_run.get("started_at"):
+        # Extract date from started_at (YYYY-MM-DD from ISO timestamp)
+        latest_date = latest_run["started_at"][:10]
+        return RedirectResponse(url=f"/ui/date/{latest_date}", status_code=302)
+
+    # No runs yet for this user - show welcome page
     return templates.TemplateResponse(
         request,
         "welcome.html",
@@ -72,10 +223,12 @@ def root(request: Request):
     )
 
 @app.get("/api/history")
-def api_history(limit: int = 20):
+def api_history(request: Request, limit: int = 20):
     """Return recent dates with ratings for nav menu."""
     with db_conn() as conn:
-        data = build_homepage_data(conn, page=1, per_page=limit)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+        data = build_homepage_data(conn, page=1, per_page=limit, user_id=user_id)
     return {"dates": data["dates"]}
 
 
@@ -83,7 +236,9 @@ def api_history(limit: int = 20):
 def ui_history(request: Request, page: int = 1):
     """History page showing all past digests."""
     with db_conn() as conn:
-        data = build_homepage_data(conn, page=page, per_page=15)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+        data = build_homepage_data(conn, page=page, per_page=15, user_id=user_id)
 
     return templates.TemplateResponse(
         request,
@@ -283,19 +438,23 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
     now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
 
     with db_conn() as conn:
-        # Load dynamic source weights (Milestone 3b)
-        source_weights = get_active_source_weights(conn)
+        # Get user for scoped queries (Milestone 4)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+
+        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
+        source_weights = get_active_source_weights(conn, user_id=user_id)
         cfg = RankConfig(source_weights=source_weights)
 
         items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
-        run = get_run_by_day(conn, day=day)
+        run = get_run_by_day(conn, day=day, user_id=user_id)
 
         if not items_with_ids:
             return render_ui_error(request, 404, f"No items found for {day}.")
 
-        # Compute ai_scores (Milestone 3c)
+        # Compute ai_scores (user-scoped, Milestone 3c + 4)
         corpus = get_all_historical_items(conn, as_of_date=day)
-        positives = get_positive_feedback_items(conn, as_of_date=day)
+        positives = get_positive_feedback_items(conn, as_of_date=day, user_id=user_id)
         model = build_tfidf_model(corpus) if corpus else None
         items_only = [item for _, item in items_with_ids]
         item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items_only]
@@ -304,11 +463,11 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
 
         display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n, ai_scores=ai_scores)
 
-        # Get existing feedback for this run
+        # Get existing feedback for this run (user-scoped)
         run_id = run.get("run_id") if run else None
         item_feedback = {}
         if run_id:
-            item_feedback = get_all_item_feedback_for_run(conn, run_id=run_id)
+            item_feedback = get_all_item_feedback_for_run(conn, run_id=run_id, user_id=user_id)
 
     # Format run timestamp for display (customer-safe)
     run_status = None
@@ -336,6 +495,10 @@ def ui_item(request: Request, item_id: int):
         return render_ui_error(request, 400, "item_id must be >= 1")
 
     with db_conn() as conn:
+        # Get user for scoped queries (Milestone 4)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+
         result = get_news_item_by_id(conn, item_id=item_id)
 
         if result is None:
@@ -344,8 +507,8 @@ def ui_item(request: Request, item_id: int):
         item, day = result
         now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
 
-        # Load dynamic source weights (Milestone 3b)
-        source_weights = get_active_source_weights(conn)
+        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
+        source_weights = get_active_source_weights(conn, user_id=user_id)
         cfg = RankConfig(source_weights=source_weights)
 
     expl = explain_item(item, now=now, cfg=cfg)
@@ -361,6 +524,9 @@ def debug_run(run_id: str, request: Request):
     request_id = request.state.request_id
 
     with db_conn() as conn:
+        # Admin only (Milestone 4)
+        require_admin(request, conn)
+
         run = get_run_by_id(conn, run_id=run_id)
         failures_data = get_run_failures_with_sources(conn, run_id=run_id)
         artifact_paths = get_run_artifacts(conn, run_id=run_id)
@@ -368,8 +534,6 @@ def debug_run(run_id: str, request: Request):
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     
-    started_at = run.get("started_at", "") or ""
-    day = started_at[:10] if len(started_at)>= 10 else ""
     #Build counts dict
     counts = {
         "received": run.get("received"),
@@ -409,12 +573,16 @@ def debug_run(run_id: str, request: Request):
 
 
 @app.get("/debug/http_error")
-def debug_http_error():
+def debug_http_error(request: Request):
+    with db_conn() as conn:
+        require_admin(request, conn)
     raise HTTPException(status_code=400, detail="Bad request (debug)")
 
 
 @app.get("/debug/crash")
-def debug_crash():
+def debug_crash(request: Request):
+    with db_conn() as conn:
+        require_admin(request, conn)
     raise RuntimeError("boom")
 
 
@@ -426,6 +594,9 @@ def debug_stats(request: Request):
     db_path = os.environ.get("NEWS_DB_PATH", "./data/news.db")
 
     with db_conn() as conn:
+        # Admin only (Milestone 4)
+        require_admin(request, conn)
+
         stats = build_debug_stats(conn, date_limit=10)
 
     return {
@@ -461,6 +632,9 @@ def debug_costs(request: Request, date: str | None = None):
     daily_cap = float(os.environ.get("LLM_DAILY_CAP_USD", "1.00"))
 
     with db_conn() as conn:
+        # Admin only (Milestone 4)
+        require_admin(request, conn)
+
         daily_spend = get_daily_spend(conn, day=date)
         refusal_counts = get_daily_refusal_counts(conn, day=date)
 

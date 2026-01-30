@@ -257,7 +257,7 @@ def test_endpoint_item_feedback_creates_feedback():
     data = response.json()
     assert data["status"] == "saved"
     assert data["feedback_id"] is not None
-    assert data["useful"] == True
+    assert data["useful"]
 
 def test_endpoint_validation_error_returns_problem_details():
     """Invalid request body returns ProblemDetails format."""
@@ -300,7 +300,9 @@ def test_all_responses_have_request_id_header():
 
 def test_404_error_returns_problem_details():
     """404 errors return ProblemDetails format."""
+    from tests.conftest import create_admin_session
     client = TestClient(app)
+    client = create_admin_session(client)
 
     # Hit an endpoint that will 404
     response = client.get("/debug/run/nonexistent-run-id")
@@ -317,7 +319,9 @@ def test_404_error_returns_problem_details():
 
 def test_500_error_returns_problem_details_no_leak():
     """500 errors return ProblemDetails without leaking stack trace."""
+    from tests.conftest import create_admin_session
     client = TestClient(app, raise_server_exceptions=False)
+    client = create_admin_session(client)
 
     # Hit debug endpoint that crashes
     response = client.get("/debug/crash")
@@ -368,7 +372,6 @@ def test_different_idempotency_keys_processed_separately():
 
 def test_idempotency_skips_processing_on_second_request(monkeypatch):
     """Second request with same idempotency key should NOT call upsert."""    
-    from src.db import get_conn, init_db
 
     # Track how many times upsert is called
     call_count = {"value": 0}

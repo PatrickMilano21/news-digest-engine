@@ -25,6 +25,8 @@ from src.repo import (
     count_items_for_dates,
     count_runs_for_dates,
     get_items_count_by_date,
+    get_user_config,
+    get_active_source_weights,
 )
 from src.llm_schemas.summary import SummaryResult
 from src.schemas import NewsItem
@@ -123,10 +125,21 @@ def _fetch_cached_summary(conn, item: NewsItem) -> SummaryResult | None:
         return None
 
 
-def build_homepage_data(conn, *, page: int = 1, per_page: int = 10) -> dict:
+def build_homepage_data(
+    conn,
+    *,
+    page: int = 1,
+    per_page: int = 10,
+    user_id: str | None = None,
+) -> dict:
     """Build data for the homepage view.
 
     Composes repo primitives to build the homepage display model.
+
+    Args:
+        page: Page number (1-indexed)
+        per_page: Items per page
+        user_id: User ID for scoped data. None = global/legacy data.
 
     Returns:
         {
@@ -136,24 +149,24 @@ def build_homepage_data(conn, *, page: int = 1, per_page: int = 10) -> dict:
                            "has_prev": False, "has_next": True}
         }
     """
-    # Get total and paginated dates
+    # Get total and paginated dates (news_items are global/shared)
     total = count_distinct_dates(conn)
     offset = (page - 1) * per_page
     dates = get_distinct_dates(conn, limit=per_page, offset=offset)
 
-    # Enrich each date with run_id and rating
+    # Enrich each date with run_id and rating (user-scoped)
     dates_with_stats = []
     for day in dates:
-        run = get_run_by_day(conn, day=day)
+        run = get_run_by_day(conn, day=day, user_id=user_id)
         run_id = run["run_id"] if run else None
         rating = 0
         if run_id:
-            feedback = get_run_feedback(conn, run_id=run_id)
+            feedback = get_run_feedback(conn, run_id=run_id, user_id=user_id)
             rating = feedback["rating"] if feedback else 0
         dates_with_stats.append({"day": day, "run_id": run_id, "rating": rating})
 
-    # Get recent runs
-    runs = get_recent_runs_summary(conn, limit=10)
+    # Get recent runs (user-scoped)
+    runs = get_recent_runs_summary(conn, limit=10, user_id=user_id)
 
     # Pagination
     total_pages = (total + per_page - 1) // per_page if total > 0 else 1
@@ -204,3 +217,43 @@ def build_debug_stats(conn, *, date_limit: int = 10) -> dict:
         "items_by_date": items_by_date,
         "recent_runs": recent_runs,
     }
+
+
+def get_effective_rank_config(conn, *, user_id: str | None = None) -> RankConfig:
+    """
+    Build effective RankConfig for a user.
+
+    Merges configuration in order:
+    1. Start with defaults
+    2. Overlay user_config (if exists)
+    3. Overlay active source weights (user-scoped in future)
+
+    Enforces bounds: ai_score_alpha clamped to [0.0, 0.2]
+
+    Args:
+        conn: Database connection
+        user_id: User ID (None for global/legacy config)
+
+    Returns:
+        RankConfig with all overrides applied
+    """
+    # Start with defaults
+    cfg_dict = RankConfig().model_dump()
+
+    # Overlay user config if provided
+    if user_id:
+        user_config = get_user_config(conn, user_id=user_id)
+        if user_config:
+            # Merge user overrides (only specified fields)
+            for key, value in user_config.items():
+                if key in cfg_dict and value is not None:
+                    cfg_dict[key] = value
+
+    # Overlay active source weights (user-scoped)
+    source_weights = get_active_source_weights(conn, user_id=user_id)
+    cfg_dict["source_weights"] = source_weights
+
+    # Enforce bounds on ai_score_alpha
+    cfg_dict["ai_score_alpha"] = max(0.0, min(0.2, cfg_dict.get("ai_score_alpha", 0.1)))
+
+    return RankConfig(**cfg_dict)

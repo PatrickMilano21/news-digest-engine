@@ -45,13 +45,21 @@ def insert_news_items(conn: sqlite3.Connection,items: list[NewsItem]) -> dict:
     return {"inserted": inserted, "duplicates": duplicates}
 
 
-def start_run(conn: sqlite3.Connection, run_id: str, started_at: datetime, received: int, *, run_type: str = "ingest") -> None:
+def start_run(
+    conn: sqlite3.Connection,
+    run_id: str,
+    started_at: datetime,
+    received: int,
+    *,
+    run_type: str = "ingest",
+    user_id: str | None = None,
+) -> None:
     conn.execute(
         """
-        INSERT INTO runs (run_id, started_at, status, received, run_type)
-        VALUES (?, ?, ?, ?, ?);
+        INSERT INTO runs (run_id, started_at, status, received, run_type, user_id)
+        VALUES (?, ?, ?, ?, ?, ?);
         """,
-        (run_id, started_at, "started", received, run_type),
+        (run_id, started_at, "started", received, run_type, user_id),
     )
     conn.commit()
 
@@ -78,21 +86,48 @@ def finish_run_error(conn: sqlite3.Connection, run_id: str, finished_at: datetim
     conn.commit()
 
 
-def get_latest_run(conn: sqlite3.Connection) -> dict | None:
-    row = conn.execute(
-        """
-        SELECT run_id, started_at, finished_at, status,
-               received, after_dedupe, inserted, duplicates,
-               error_type, error_message
-        FROM runs
-        ORDER BY started_at DESC
-        LIMIT 1;
-        """
-    ).fetchone()
+def get_latest_run(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str | None = None,
+) -> dict | None:
+    """Get the most recent run.
+
+    Args:
+        user_id: Filter by user_id. None = global/legacy runs (user_id IS NULL).
+
+    Returns:
+        Run dict or None if no runs found.
+    """
+    if user_id is None:
+        row = conn.execute(
+            """
+            SELECT run_id, started_at, finished_at, status,
+                   received, after_dedupe, inserted, duplicates,
+                   error_type, error_message
+            FROM runs
+            WHERE user_id IS NULL
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT run_id, started_at, finished_at, status,
+                   received, after_dedupe, inserted, duplicates,
+                   error_type, error_message
+            FROM runs
+            WHERE user_id = ?
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """,
+            (user_id,)
+        ).fetchone()
 
     if row is None:
         return None
-    
+
     return {
         "run_id": row[0],
         "started_at": row[1],
@@ -165,27 +200,51 @@ def get_news_items_by_date(conn: sqlite3.Connection, *, day: str) -> list[NewsIt
     return out
 
 
-def get_run_by_day(conn: sqlite3.Connection, *, day: str, run_type: str = "ingest") -> dict | None:
+def get_run_by_day(
+    conn: sqlite3.Connection,
+    *,
+    day: str,
+    run_type: str = "ingest",
+    user_id: str | None = None,
+) -> dict | None:
     """
     Read-only. Return the most recent run for a given YYYY-MM-DD day.
 
     Args:
         day: Date string in YYYY-MM-DD format
         run_type: Filter by run type ('ingest', 'eval'). Default 'ingest'.
+        user_id: Filter by user_id. None = global/legacy runs (user_id IS NULL).
     """
-    row = conn.execute(
-        """
-        SELECT run_id, started_at, finished_at, status,
-               received, after_dedupe, inserted, duplicates,
-               error_type, error_message, run_type
-        FROM runs
-        WHERE substr(started_at, 1, 10) = ?
-          AND run_type = ?
-        ORDER BY started_at DESC
-        LIMIT 1;
-        """,
-        (day, run_type),
-    ).fetchone()
+    if user_id is None:
+        row = conn.execute(
+            """
+            SELECT run_id, started_at, finished_at, status,
+                   received, after_dedupe, inserted, duplicates,
+                   error_type, error_message, run_type
+            FROM runs
+            WHERE substr(started_at, 1, 10) = ?
+              AND run_type = ?
+              AND user_id IS NULL
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """,
+            (day, run_type),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT run_id, started_at, finished_at, status,
+                   received, after_dedupe, inserted, duplicates,
+                   error_type, error_message, run_type
+            FROM runs
+            WHERE substr(started_at, 1, 10) = ?
+              AND run_type = ?
+              AND user_id = ?
+            ORDER BY started_at DESC
+            LIMIT 1;
+            """,
+            (day, run_type, user_id),
+        ).fetchone()
 
     if row is None:
         return None
@@ -445,7 +504,7 @@ def write_audit_log(conn: sqlite3.Connection, *, event_type: str, ts: datetime |
             """,(ts_str, event_type, run_id, day, json.dumps(details_safe))
         )
         conn.commit()
-    except:
+    except Exception:
         pass # swallow errors
 
 def get_audit_logs(conn: sqlite3.Connection, *, limit: int = 100) -> list[dict]:
@@ -599,28 +658,38 @@ def store_idempotency_response(conn: sqlite3.Connection, *, key: str, endpoint: 
     conn.commit()
 
 
-def upsert_run_feedback(conn: sqlite3.Connection, *, run_id: str, rating: int, comment: str | None,
-                        created_at: str, updated_at: str) -> int:
+def upsert_run_feedback(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    rating: int,
+    comment: str | None,
+    created_at: str,
+    updated_at: str,
+    user_id: str | None = None,
+) -> int:
     """
     Insert or update feedback for a run (overall digest rating).
 
     - First submit for run_id → INSERT new row
     - Submit again for same run_id → UPDATE existing row
 
+    Args:
+        user_id: User ID for scoped feedback. None = global/legacy feedback.
+
     Returns:
         feedback_id of the inserted/updated row
     """
-
-    # Try INSERT first
     cur = conn.execute(
-        """INSERT INTO run_feedback (run_id, rating, comment, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?)
+        """INSERT INTO run_feedback (run_id, rating, comment, created_at, updated_at, user_id)
+            VALUES (?, ?, ?, ?, ?, ?)
             ON CONFLICT(run_id) DO UPDATE SET
                 rating = excluded.rating,
                 comment = excluded.comment,
-                updated_at = excluded.updated_at
+                updated_at = excluded.updated_at,
+                user_id = excluded.user_id
             RETURNING feedback_id""",
-        (run_id, rating, comment, created_at, updated_at)
+        (run_id, rating, comment, created_at, updated_at, user_id)
     )
     row = cur.fetchone()
     conn.commit()
@@ -628,8 +697,17 @@ def upsert_run_feedback(conn: sqlite3.Connection, *, run_id: str, rating: int, c
 
 
 
-def upsert_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str, useful: int,
-                         created_at: str, updated_at: str, reason_tag: str | None = None) -> int:
+def upsert_item_feedback(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    item_url: str,
+    useful: int,
+    created_at: str,
+    updated_at: str,
+    reason_tag: str | None = None,
+    user_id: str | None = None,
+) -> int:
     """
     Insert or update feedback for a specific item in a run.
 
@@ -639,19 +717,21 @@ def upsert_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str
     Args:
         useful: 1 = useful (thumbs up), 0 = not useful (thumbs down)
         reason_tag: Optional user-selected feedback reason tag (Milestone 3a)
+        user_id: User ID for scoped feedback. None = global/legacy feedback.
 
     Returns:
         feedback_id of the inserted/updated row
     """
     cur = conn.execute(
-        """INSERT INTO item_feedback (run_id, item_url, useful, reason_tag, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?)
+        """INSERT INTO item_feedback (run_id, item_url, useful, reason_tag, created_at, updated_at, user_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(run_id, item_url) DO UPDATE SET
                useful = excluded.useful,
                reason_tag = excluded.reason_tag,
-               updated_at = excluded.updated_at
+               updated_at = excluded.updated_at,
+               user_id = excluded.user_id
            RETURNING feedback_id""",
-        (run_id, item_url, useful, reason_tag, created_at, updated_at)
+        (run_id, item_url, useful, reason_tag, created_at, updated_at, user_id)
     )
     row = cur.fetchone()
     conn.commit()
@@ -725,18 +805,34 @@ def get_items_count_by_date(conn: sqlite3.Connection, *, dates: list[str]) -> li
     return result
 
 
-def get_recent_runs_summary(conn: sqlite3.Connection, *, limit: int = 10) -> list[dict]:
+def get_recent_runs_summary(
+    conn: sqlite3.Connection,
+    *,
+    limit: int = 10,
+    user_id: str | None = None,
+) -> list[dict]:
     """Get recent runs with basic info for display.
+
+    Args:
+        limit: Maximum number of runs to return.
+        user_id: Filter by user_id. None = global/legacy runs (user_id IS NULL).
 
     Returns:
         [{"run_id": "...", "day": "2026-01-25", "status": "ok",
           "run_type": "ingest", "received": 150, "inserted": 140}, ...]
     """
-    rows = conn.execute(
-        """SELECT run_id, substr(started_at, 1, 10) as day, status, run_type, received, inserted
-           FROM runs ORDER BY started_at DESC LIMIT ?""",
-        (limit,)
-    ).fetchall()
+    if user_id is None:
+        rows = conn.execute(
+            """SELECT run_id, substr(started_at, 1, 10) as day, status, run_type, received, inserted
+               FROM runs WHERE user_id IS NULL ORDER BY started_at DESC LIMIT ?""",
+            (limit,)
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """SELECT run_id, substr(started_at, 1, 10) as day, status, run_type, received, inserted
+               FROM runs WHERE user_id = ? ORDER BY started_at DESC LIMIT ?""",
+            (user_id, limit)
+        ).fetchall()
     return [
         {"run_id": r[0], "day": r[1], "status": r[2], "run_type": r[3], "received": r[4], "inserted": r[5]}
         for r in rows
@@ -785,13 +881,30 @@ def get_daily_refusal_counts(conn: sqlite3.Connection, *, day: str) -> dict[str,
     return {row[0]: row[1] for row in rows}
 
 
-def get_run_feedback(conn: sqlite3.Connection, *, run_id: str) -> dict | None:
-    """Get feedback for a run, if it exists."""
-    cur = conn.execute(
-        """SELECT feedback_id, run_id, rating, comment, created_at, updated_at
-           FROM run_feedback WHERE run_id = ?""",
-        (run_id,)
-    )
+def get_run_feedback(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    user_id: str | None = None,
+) -> dict | None:
+    """Get feedback for a run, if it exists.
+
+    Args:
+        run_id: Run ID
+        user_id: Filter by user_id. None = global/legacy feedback (user_id IS NULL).
+    """
+    if user_id is None:
+        cur = conn.execute(
+            """SELECT feedback_id, run_id, rating, comment, created_at, updated_at
+               FROM run_feedback WHERE run_id = ? AND user_id IS NULL""",
+            (run_id,)
+        )
+    else:
+        cur = conn.execute(
+            """SELECT feedback_id, run_id, rating, comment, created_at, updated_at
+               FROM run_feedback WHERE run_id = ? AND user_id = ?""",
+            (run_id, user_id)
+        )
     row = cur.fetchone()
     if row is None:
         return None
@@ -826,12 +939,30 @@ def get_item_feedback(conn: sqlite3.Connection, *, run_id: str, item_url: str) -
     }
 
 
-def get_all_item_feedback_for_run(conn: sqlite3.Connection, *, run_id: str) -> dict[str, dict]:
-    """Get all item feedback for a run, keyed by item_url."""
-    cur = conn.execute(
-        """SELECT item_url, useful, reason_tag FROM item_feedback WHERE run_id = ?""",
-        (run_id,)
-    )
+def get_all_item_feedback_for_run(
+    conn: sqlite3.Connection,
+    *,
+    run_id: str,
+    user_id: str | None = None,
+) -> dict[str, dict]:
+    """Get all item feedback for a run, keyed by item_url.
+
+    Args:
+        run_id: Run ID
+        user_id: Filter by user_id. None = global/legacy feedback (user_id IS NULL).
+    """
+    if user_id is None:
+        cur = conn.execute(
+            """SELECT item_url, useful, reason_tag FROM item_feedback
+               WHERE run_id = ? AND user_id IS NULL""",
+            (run_id,)
+        )
+    else:
+        cur = conn.execute(
+            """SELECT item_url, useful, reason_tag FROM item_feedback
+               WHERE run_id = ? AND user_id = ?""",
+            (run_id, user_id)
+        )
     return {
         row[0]: {"useful": row[1], "reason_tag": row[2]}
         for row in cur.fetchall()
@@ -950,12 +1081,19 @@ def aggregate_feedback_by_source(
     return result
 
 
-def get_active_source_weights(conn: sqlite3.Connection) -> dict[str, float]:
+def get_active_source_weights(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str | None = None,
+) -> dict[str, float]:
     """
     Load active source weights from the latest applied snapshot.
 
     Merges snapshot weights over RankConfig defaults.
     If no applied snapshot exists, returns defaults.
+
+    Args:
+        user_id: Filter by user_id. None = global/legacy snapshots (user_id IS NULL).
 
     Returns:
         Dict mapping source name (lowercase) to weight
@@ -965,16 +1103,28 @@ def get_active_source_weights(conn: sqlite3.Connection) -> dict[str, float]:
     # Get defaults from RankConfig
     defaults = RankConfig().source_weights.copy()
 
-    # Find latest applied snapshot
-    row = conn.execute(
-        """
-        SELECT weights_after
-        FROM weight_snapshots
-        WHERE applied = 1
-        ORDER BY cycle_date DESC, created_at DESC
-        LIMIT 1
-        """
-    ).fetchone()
+    # Find latest applied snapshot (user-scoped)
+    if user_id is None:
+        row = conn.execute(
+            """
+            SELECT weights_after
+            FROM weight_snapshots
+            WHERE applied = 1 AND user_id IS NULL
+            ORDER BY cycle_date DESC, created_at DESC
+            LIMIT 1
+            """
+        ).fetchone()
+    else:
+        row = conn.execute(
+            """
+            SELECT weights_after
+            FROM weight_snapshots
+            WHERE applied = 1 AND user_id = ?
+            ORDER BY cycle_date DESC, created_at DESC
+            LIMIT 1
+            """,
+            (user_id,)
+        ).fetchone()
 
     if row is None:
         return defaults
@@ -1127,6 +1277,7 @@ def get_positive_feedback_items(
     *,
     window_days: int | None = None,
     as_of_date: str | None = None,
+    user_id: str | None = None,
 ) -> list[dict]:
     """
     Get items that received thumbs-up feedback for TF-IDF similarity.
@@ -1134,6 +1285,7 @@ def get_positive_feedback_items(
     Args:
         window_days: Limit to last N days (None = all time)
         as_of_date: Reference date for window calc (default: today)
+        user_id: Filter by user_id. None = global/legacy feedback (user_id IS NULL).
 
     Returns:
         List of {url, title, evidence} dicts for positive items
@@ -1141,29 +1293,39 @@ def get_positive_feedback_items(
     if as_of_date is None:
         as_of_date = datetime.now(timezone.utc).date().isoformat()
 
+    # Build user filter clause
+    if user_id is None:
+        user_filter = "f.user_id IS NULL"
+        user_params: tuple = ()
+    else:
+        user_filter = "f.user_id = ?"
+        user_params = (user_id,)
+
     if window_days is not None:
         as_of = datetime.strptime(as_of_date, "%Y-%m-%d").date()
         window_start = (as_of - timedelta(days=window_days)).isoformat()
         rows = conn.execute(
-            """
+            f"""
             SELECT DISTINCT n.url, n.title, n.evidence
             FROM item_feedback f
             JOIN news_items n ON f.item_url = n.url
             JOIN runs r ON f.run_id = r.run_id
             WHERE f.useful = 1
+              AND {user_filter}
               AND DATE(r.started_at) >= ?
               AND DATE(r.started_at) <= ?
             """,
-            (window_start, as_of_date),
+            user_params + (window_start, as_of_date),
         ).fetchall()
     else:
         rows = conn.execute(
-            """
+            f"""
             SELECT DISTINCT n.url, n.title, n.evidence
             FROM item_feedback f
             JOIN news_items n ON f.item_url = n.url
-            WHERE f.useful = 1
-            """
+            WHERE f.useful = 1 AND {user_filter}
+            """,
+            user_params,
         ).fetchall()
 
     return [{"url": r[0], "title": r[1], "evidence": r[2]} for r in rows]
@@ -1209,5 +1371,276 @@ def get_all_historical_items(
         ).fetchall()
 
     return [{"url": r[0], "title": r[1], "evidence": r[2]} for r in rows]
+
+
+# --- User Management (Milestone 4) ---
+
+def create_user(
+    conn: sqlite3.Connection,
+    *,
+    email: str,
+    password_hash: str | None,
+    role: str = "user",
+) -> str:
+    """
+    Create a new user.
+
+    Args:
+        email: User's email address (must be unique)
+        password_hash: Bcrypt hash of password (None for magic link only)
+        role: User role ('user' or 'admin')
+
+    Returns:
+        user_id (UUID string)
+
+    Raises:
+        sqlite3.IntegrityError if email already exists
+    """
+    import uuid
+    user_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc).isoformat()
+
+    conn.execute(
+        """
+        INSERT INTO users (user_id, email, password_hash, role, created_at)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (user_id, email, password_hash, role, created_at),
+    )
+    conn.commit()
+    return user_id
+
+
+def get_user_by_email(conn: sqlite3.Connection, *, email: str) -> dict | None:
+    """
+    Look up a user by email address.
+
+    Returns:
+        User dict or None if not found
+    """
+    row = conn.execute(
+        """
+        SELECT user_id, email, password_hash, role, created_at, last_login_at
+        FROM users
+        WHERE email = ?
+        """,
+        (email,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "user_id": row[0],
+        "email": row[1],
+        "password_hash": row[2],
+        "role": row[3],
+        "created_at": row[4],
+        "last_login_at": row[5],
+    }
+
+
+def get_user_by_id(conn: sqlite3.Connection, *, user_id: str) -> dict | None:
+    """
+    Look up a user by ID.
+
+    Returns:
+        User dict or None if not found
+    """
+    row = conn.execute(
+        """
+        SELECT user_id, email, password_hash, role, created_at, last_login_at
+        FROM users
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "user_id": row[0],
+        "email": row[1],
+        "password_hash": row[2],
+        "role": row[3],
+        "created_at": row[4],
+        "last_login_at": row[5],
+    }
+
+
+def update_user_last_login(conn: sqlite3.Connection, *, user_id: str) -> None:
+    """Update user's last_login_at timestamp."""
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        "UPDATE users SET last_login_at = ? WHERE user_id = ?",
+        (now, user_id),
+    )
+    conn.commit()
+
+
+# --- Session Management (Milestone 4) ---
+
+def create_session(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    expires_hours: int = 24,
+) -> str:
+    """
+    Create a new session for a user.
+
+    Args:
+        user_id: User ID to create session for
+        expires_hours: Session lifetime in hours (default 24)
+
+    Returns:
+        session_id (UUID token)
+    """
+    import uuid
+    session_id = str(uuid.uuid4())
+    created_at = datetime.now(timezone.utc)
+    expires_at = created_at + timedelta(hours=expires_hours)
+
+    conn.execute(
+        """
+        INSERT INTO sessions (session_id, user_id, created_at, expires_at)
+        VALUES (?, ?, ?, ?)
+        """,
+        (session_id, user_id, created_at.isoformat(), expires_at.isoformat()),
+    )
+    conn.commit()
+    return session_id
+
+
+def get_session(conn: sqlite3.Connection, *, session_id: str) -> dict | None:
+    """
+    Look up a session by ID.
+
+    CRITICAL: This function enforces session expiry. It returns None for
+    expired sessions, ensuring they are rejected everywhere.
+
+    Returns:
+        Session dict or None if not found or expired
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    row = conn.execute(
+        """
+        SELECT session_id, user_id, created_at, expires_at
+        FROM sessions
+        WHERE session_id = ?
+          AND expires_at > ?
+        """,
+        (session_id, now),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "session_id": row[0],
+        "user_id": row[1],
+        "created_at": row[2],
+        "expires_at": row[3],
+    }
+
+
+def delete_session(conn: sqlite3.Connection, *, session_id: str) -> None:
+    """
+    Delete a session (logout).
+    """
+    conn.execute("DELETE FROM sessions WHERE session_id = ?", (session_id,))
+    conn.commit()
+
+
+def delete_expired_sessions(conn: sqlite3.Connection) -> int:
+    """
+    Clean up expired sessions.
+
+    Returns:
+        Number of sessions deleted
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    cur = conn.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+    conn.commit()
+    return cur.rowcount
+
+
+# --- User Config (Milestone 4) ---
+
+def get_user_config(conn: sqlite3.Connection, *, user_id: str) -> dict | None:
+    """
+    Get a user's config overrides.
+
+    Returns:
+        Parsed config dict or None if user has no custom config
+    """
+    row = conn.execute(
+        """
+        SELECT config_json
+        FROM user_configs
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    try:
+        return json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None
+
+
+def upsert_user_config(conn: sqlite3.Connection, *, user_id: str, config: dict) -> None:
+    """
+    Create or update a user's config.
+
+    Args:
+        user_id: User ID
+        config: Partial RankConfig dict (overrides only)
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    config_json = json.dumps(config)
+
+    conn.execute(
+        """
+        INSERT INTO user_configs (user_id, config_json, created_at, updated_at)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            config_json = excluded.config_json,
+            updated_at = excluded.updated_at
+        """,
+        (user_id, config_json, now, now),
+    )
+    conn.commit()
+
+
+def get_all_users(conn: sqlite3.Connection) -> list[dict]:
+    """
+    Get all users (for admin or job iteration).
+
+    Returns:
+        List of user dicts
+    """
+    rows = conn.execute(
+        """
+        SELECT user_id, email, role, created_at, last_login_at
+        FROM users
+        ORDER BY created_at
+        """
+    ).fetchall()
+
+    return [
+        {
+            "user_id": row[0],
+            "email": row[1],
+            "role": row[2],
+            "created_at": row[3],
+            "last_login_at": row[4],
+        }
+        for row in rows
+    ]
 
 

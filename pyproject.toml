@@ -9,6 +9,7 @@ dependencies = [
   "jinja2>=3.1",
   "python-dotenv>=1.0",
   "scikit-learn>=1.4",
+  "bcrypt>=4.0",
 ]
 
 [project.optional-dependencies]
@@ -27,3 +28,8 @@ pythonpath = ["src"]
 
 [tool.ruff]
 line-length = 100
+
+[tool.ruff.lint.per-file-ignores]
+"src/main.py" = ["E402"]
+"jobs/*.py" = ["E402"]
+"tests/test_feedback_tags.py" = ["E402"]

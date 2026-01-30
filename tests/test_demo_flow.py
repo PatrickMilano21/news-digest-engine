@@ -37,7 +37,7 @@ def seed_items_for_day(day: str) -> list[int]:
     """Seed test items and return their database IDs."""
     from src.schemas import NewsItem
     from src.repo import insert_news_items
-    from datetime import datetime, timezone
+    from datetime import datetime
 
     items = [
         NewsItem(
@@ -94,11 +94,16 @@ def test_ui_date_valid_links_present(client: TestClient):
 
 
 def test_debug_run_not_found_404(client: TestClient):
+    from tests.conftest import create_admin_session
+    client = create_admin_session(client)
     resp = client.get("/debug/run/doesnotexist")
     assert resp.status_code == 404
 
 
 def test_debug_run_returns_artifact_path(client: TestClient):
+    from tests.conftest import create_admin_session
+    client = create_admin_session(client)
+
     day = "2026-01-14"
     run_id = seed_ok_run_for_day(day)
 
@@ -118,6 +123,9 @@ def test_debug_run_returns_artifact_path(client: TestClient):
 
 
 def test_debug_run_returns_breakdown_and_artifacts(client: TestClient):
+    from tests.conftest import create_admin_session
+    client = create_admin_session(client)
+
     day = "2026-01-14"
 
     # Seed run
@@ -160,6 +168,9 @@ def test_debug_run_returns_breakdown_and_artifacts(client: TestClient):
 
 def test_debug_run_includes_llm_stats(client: TestClient):
     """Test that /debug/run/{run_id} includes LLM stats section."""
+    from tests.conftest import create_admin_session
+    client = create_admin_session(client)
+
     day = "2026-01-20"
     run_id = uuid.uuid4().hex
     started_at = f"{day}T00:00:00+00:00"
@@ -202,6 +213,9 @@ def test_debug_run_includes_llm_stats(client: TestClient):
 
 def test_debug_run_llm_stats_defaults_to_zero(client: TestClient):
     """Test that runs without LLM stats show zeros in the response."""
+    from tests.conftest import create_admin_session
+    client = create_admin_session(client)
+
     day = "2026-01-20"
     run_id = uuid.uuid4().hex
 
@@ -230,6 +244,9 @@ def test_debug_run_llm_stats_defaults_to_zero(client: TestClient):
 
 def test_debug_run_includes_failed_sources(client: TestClient):
     """GET /debug/run/{run_id} includes failed_sources in response."""
+    from tests.conftest import create_admin_session
+    client = create_admin_session(client)
+
     day = "2026-01-25"
     run_id = uuid.uuid4().hex
 
@@ -259,8 +276,11 @@ def test_debug_run_includes_failed_sources(client: TestClient):
 
 def test_debug_stats_scoped_to_last_10_dates(client: TestClient):
     """GET /debug/stats returns counts for last 10 dates only."""
+    from tests.conftest import create_admin_session
     from src.schemas import NewsItem
     from src.repo import insert_news_items
+
+    client = create_admin_session(client)
 
     conn = get_conn()
     try:
@@ -296,8 +316,11 @@ def test_debug_stats_scoped_to_last_10_dates(client: TestClient):
 
 def test_debug_stats_items_by_date_breakdown(client: TestClient):
     """GET /debug/stats returns items_by_date with correct counts."""
+    from tests.conftest import create_admin_session
     from src.schemas import NewsItem
     from src.repo import insert_news_items
+
+    client = create_admin_session(client)
 
     conn = get_conn()
     try:

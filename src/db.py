@@ -206,6 +206,41 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # users table - Milestone 4 (Multi-User)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS users (
+            user_id TEXT PRIMARY KEY,
+            email TEXT NOT NULL UNIQUE,
+            password_hash TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            created_at TEXT NOT NULL,
+            last_login_at TEXT
+        )
+    """)
+
+    # user_configs table - per-user ranking config overrides (Milestone 4)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_configs (
+            config_id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            config_json TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
+
+    # sessions table - server-side session management (Milestone 4)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS sessions (
+            session_id TEXT PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            expires_at TEXT NOT NULL,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
+
     conn.commit()
 
     # Idempotent migration: add run_type column if missing (for existing DBs)
@@ -240,4 +275,22 @@ def init_db(conn: sqlite3.Connection) -> None:
     cols = [row[1] for row in conn.execute("PRAGMA table_info(item_feedback);").fetchall()]
     if "reason_tag" not in cols:
         conn.execute("ALTER TABLE item_feedback ADD COLUMN reason_tag TEXT;")
+        conn.commit()
+
+    # Idempotent migration: add user_id column to runs (Milestone 4)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(runs);").fetchall()]
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE runs ADD COLUMN user_id TEXT;")
+        conn.commit()
+
+    # Idempotent migration: add user_id column to item_feedback (Milestone 4)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(item_feedback);").fetchall()]
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE item_feedback ADD COLUMN user_id TEXT;")
+        conn.commit()
+
+    # Idempotent migration: add user_id column to run_feedback (Milestone 4)
+    cols = [row[1] for row in conn.execute("PRAGMA table_info(run_feedback);").fetchall()]
+    if "user_id" not in cols:
+        conn.execute("ALTER TABLE run_feedback ADD COLUMN user_id TEXT;")
         conn.commit()

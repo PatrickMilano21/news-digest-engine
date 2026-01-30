@@ -65,7 +65,7 @@ Artifacts are overwritten on re-runs for the same date. No automatic cleanup —
 ### Step 1: Get the Latest Run
 
 ```bash
-curl http://localhost:8000/runs/latest
+curl http://localhost:8001/runs/latest
 ```
 
 Returns:
@@ -83,7 +83,7 @@ Returns:
 ### Step 2: Get Full Debug Details
 
 ```bash
-curl http://localhost:8000/debug/run/{run_id}
+curl http://localhost:8001/debug/run/{run_id}
 ```
 
 Returns:
@@ -247,7 +247,7 @@ These are conditions that indicate problems. No automated alerting is configured
 # Run tests
 make test
 
-# Start dev server (port 8000, auto-reload)
+# Start dev server (port 8001, auto-reload)
 make dev
 
 # Daily pipeline for a specific date
@@ -257,12 +257,12 @@ make run DATE=2026-01-23
 make eval DATE=2026-01-23
 
 # Query endpoints
-curl http://localhost:8000/health
-curl http://localhost:8000/runs/latest
-curl http://localhost:8000/debug/run/{run_id}
+curl http://localhost:8001/health
+curl http://localhost:8001/runs/latest
+curl http://localhost:8001/debug/run/{run_id}
 
 # View UI
-http://localhost:8000/ui/date/2026-01-23
+http://localhost:8001/ui/date/2026-01-23
 ```
 
 ---
@@ -281,7 +281,7 @@ http://localhost:8000/ui/date/2026-01-23
 ### Home Page
 
 ```
-http://localhost:8000/
+http://localhost:8001/
 ```
 
 Three tabs:
@@ -292,7 +292,7 @@ Three tabs:
 ### Date Page
 
 ```
-http://localhost:8000/ui/date/{date}
+http://localhost:8001/ui/date/{date}
 ```
 
 Shows ranked items for a date with:
@@ -304,7 +304,7 @@ Shows ranked items for a date with:
 ### Item Page
 
 ```
-http://localhost:8000/ui/item/{id}
+http://localhost:8001/ui/item/{id}
 ```
 
 Single item detail with back-link to date page.
@@ -316,7 +316,7 @@ Single item detail with back-link to date page.
 ### Run Feedback (Star Ratings)
 
 ```bash
-curl -X POST http://localhost:8000/feedback/run \
+curl -X POST http://localhost:8001/feedback/run \
   -H "Content-Type: application/json" \
   -d '{"run_id": "abc123", "rating": 4}'
 ```
@@ -328,7 +328,7 @@ curl -X POST http://localhost:8000/feedback/run \
 ### Item Feedback (Useful/Not Useful)
 
 ```bash
-curl -X POST http://localhost:8000/feedback/item \
+curl -X POST http://localhost:8001/feedback/item \
   -H "Content-Type: application/json" \
   -d '{"run_id": "abc123", "item_url": "https://...", "useful": true}'
 ```
@@ -343,7 +343,7 @@ curl -X POST http://localhost:8000/feedback/item \
 When a run has failures, you can now see exactly which feeds failed:
 
 ```bash
-curl http://localhost:8000/debug/run/{run_id}
+curl http://localhost:8001/debug/run/{run_id}
 ```
 
 Response includes:
@@ -387,3 +387,4 @@ SELECT cache_key, model_name, cost_usd, latency_ms FROM summary_cache LIMIT 10;
 ---
 
 *Last updated: Day 20 (2026-01-25)*
+

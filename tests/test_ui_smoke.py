@@ -9,7 +9,6 @@ Based on UI_Testing.md spec from Codex.
 import os
 import re
 import pytest
-from datetime import datetime, timezone
 
 # Gate these tests - they require a running server + browser
 ui_smoke = pytest.mark.skipif(

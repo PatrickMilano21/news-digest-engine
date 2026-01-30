@@ -37,10 +37,12 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--date", required=True, help="YYYY-MM-DD")
     p.add_argument("--top-n", type=int, default=10)
+    p.add_argument("--user-id", default=None, help="User ID for scoped data (None = global)")
     args = p.parse_args(argv)
 
     day = date.fromisoformat(args.date).isoformat()
     top_n = int(args.top_n)
+    user_id = args.user_id
 
     now = datetime.now(timezone.utc)
 
@@ -51,14 +53,14 @@ def main(argv: list[str] | None = None) -> int:
         run = get_run_by_day(conn, day=day)
         items = get_news_items_by_date(conn, day=day)
 
-        # Load dynamic source weights (Milestone 3b)
-        source_weights = get_active_source_weights(conn)
+        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
+        source_weights = get_active_source_weights(conn, user_id=user_id)
         cfg = RankConfig(source_weights=source_weights)
 
         # Compute ai_scores (Milestone 3c)
         # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
         corpus = get_all_historical_items(conn, as_of_date=day)
-        positives = get_positive_feedback_items(conn, as_of_date=day)
+        positives = get_positive_feedback_items(conn, as_of_date=day, user_id=user_id)
         model = build_tfidf_model(corpus) if corpus else None
         item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items]
         scores = compute_ai_scores(model, positives, item_dicts)

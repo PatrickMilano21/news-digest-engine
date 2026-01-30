@@ -233,7 +233,7 @@ class TestReasonTagStorage:
         start_run(db_conn, "run1", "2026-01-28T10:00:00+00:00", received=1)
 
         now = datetime.now(timezone.utc).isoformat()
-        feedback_id = upsert_item_feedback(
+        upsert_item_feedback(
             db_conn,
             run_id="run1",
             item_url="https://example.com/article",
@@ -306,7 +306,7 @@ class TestFeedbackTagsUI:
         from fastapi.testclient import TestClient
         from src.main import app
         from src.db import get_conn, init_db
-        from src.repo import insert_news_items, start_run, finish_run_ok
+        from src.repo import insert_news_items, start_run
         from src.schemas import NewsItem
         from datetime import datetime, timezone
 

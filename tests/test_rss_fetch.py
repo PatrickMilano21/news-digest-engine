@@ -1,5 +1,4 @@
 # Import types module (used for type checking, though not explicitly used here)
-import types
 # Import time module to mock sleep function in tests
 import time
 # Import pytest for testing utilities like pytest.raises
@@ -11,7 +10,7 @@ from src.rss_fetch import (
     fetch_rss,
     fetch_rss_with_retry,
 )
-from src.error_codes import RATE_LIMITED, FETCH_TRANSIENT
+from src.error_codes import RATE_LIMITED
 
 # ---------- helpers ----------
 
@@ -65,27 +64,8 @@ def test_fetch_rss_non_200_raises(monkeypatch):
         fetch_rss("https://example.com/feed.xml")
 
 
-# Test that fetch_rss_with_retry successfully retries after a 429 error
+# Test that fetch_rss_with_retry returns rate limited immediately on 429
 def test_fetch_rss_with_retry_429_returns_rate_limited(monkeypatch):
-    # Dictionary to track how many times our fake function was called
-    calls = {"n": 0}
-
-    # Fake function that fails on first call (429 error) but succeeds on second call
-    def fake_fetch(url, *, timeout_s):
-        calls["n"] += 1
-    # Replace the actual fetch_rss function with our fake version
-    monkeypatch.setattr("src.rss_fetch.fetch_rss", fake_fetch)
-
-    result = fetch_rss_with_retry("https://example.com/feed.xml", attempts=3)
-    # Call fetch_rss_with_retry and verify it succeeds after retry
-    assert result.ok is False
-    assert result.error_code == RATE_LIMITED
-    assert calls["n"] == 1 #No retries for 429
-
-
-
-# Test that fetch_rss_with_retry raises error after exhausting all retry attempts
-def test_fetch_rss_with_retry_429_returns_rate_limited(monkeypatch):  
     """429 returns RATE_LIMITED immediately (no retry)."""
     calls = {"n": 0}
 
@@ -93,10 +73,9 @@ def test_fetch_rss_with_retry_429_returns_rate_limited(monkeypatch):
         calls["n"] += 1
         raise RSSFetchError("HTTP 429")
 
-    monkeypatch.setattr("src.rss_fetch.fetch_rss", fake_fetch)        
+    monkeypatch.setattr("src.rss_fetch.fetch_rss", fake_fetch)
 
-    result = fetch_rss_with_retry("https://example.com/feed.xml",     
-attempts=3)
+    result = fetch_rss_with_retry("https://example.com/feed.xml", attempts=3)
 
     assert result.ok is False
     assert result.error_code == RATE_LIMITED

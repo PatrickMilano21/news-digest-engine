@@ -1,6 +1,6 @@
 PY := .\.venv\Scripts\python.exe
 
-.PHONY: dev test run eval weights
+.PHONY: dev test run eval weights lint
 
 dev:
 	$(PY) -m uvicorn src.main:app --reload --port 8001
@@ -19,3 +19,6 @@ eval:
 weights:
 	@if "$(DATE)"=="" (echo ERROR: missing DATE. Usage: make weights DATE=YYYY-MM-DD & exit /b 1)
 	$(PY) -m jobs.update_weights --date $(DATE)
+
+lint:
+	$(PY) -m ruff check .

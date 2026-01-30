@@ -1,13 +1,12 @@
 from __future__ import annotations
 
 from datetime import datetime
-import uuid
 
 import pytest
 from fastapi.testclient import TestClient
 
 from src.db import get_conn, init_db
-from src.repo import start_run, finish_run_ok, insert_news_items
+from src.repo import insert_news_items, start_run
 from src.schemas import NewsItem
 from src.main import app
 
@@ -55,7 +54,7 @@ def seed_items_for_day(day: str) -> list[int]:
 
 def test_ui_date_renders_items(client: TestClient):
     day = "2026-01-20"
-    item_ids = seed_items_for_day(day)
+    seed_items_for_day(day)
 
     resp = client.get(f"/ui/date/{day}")
 
@@ -127,9 +126,18 @@ def test_ui_item_400_invalid_id_returns_html(client: TestClient):
 # --- / (home page) tests ---
 
 def test_home_redirects_to_latest_date(client: TestClient):
-    """Home page redirects to most recent date's digest."""
+    """Home page redirects to most recent date's digest (based on runs, not items)."""
     day = "2026-01-20"
     seed_items_for_day(day)
+
+    # Create a run for the day (user_id=None for unauthenticated/global)
+    conn = get_conn()
+    try:
+        init_db(conn)
+        started_at = datetime.fromisoformat(f"{day}T12:00:00+00:00")
+        start_run(conn, "test-run", started_at, received=10, run_type="ingest", user_id=None)
+    finally:
+        conn.close()
 
     # Don't follow redirects to verify redirect behavior
     resp = client.get("/", follow_redirects=False)

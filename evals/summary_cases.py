@@ -15,7 +15,6 @@ from dataclasses import dataclass
 
 from src.llm_schemas.summary import SummaryResult, Citation
 from evals.summary_taxonomy import (
-    MISSING_CITATIONS,
     SNIPPET_NOT_GROUNDED,
     URL_MISMATCH,
     INVALID_REFUSAL_CODE,

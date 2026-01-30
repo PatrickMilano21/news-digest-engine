@@ -1,7 +1,6 @@
 # tests/test_run_rss_ingest.py
 from __future__ import annotations
 
-import os
 import pytest
 
 from src.repo import get_latest_run

@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch, Mock
 import json
 
@@ -7,7 +6,6 @@ from src.clients.llm_openai import (
     _try_parse,
     _merge_usage,
     _elapsed_ms,
-    _refuse,
 )
 from src.schemas import NewsItem
 from src.llm_schemas.summary import SummaryResult

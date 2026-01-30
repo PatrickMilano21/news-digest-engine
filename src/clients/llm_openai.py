@@ -7,7 +7,7 @@ import urllib.request
 import urllib.error 
 
 from src.schemas import NewsItem
-from src.llm_schemas.summary import SummaryResult, Citation
+from src.llm_schemas.summary import SummaryResult
 from src.json_utils import safe_parse_json
 from src.logging_utils import log_event
 from src.error_codes import LLM_PARSE_FAIL, LLM_API_FAIL, LLM_DISABLED, COST_BUDGET_EXCEEDED

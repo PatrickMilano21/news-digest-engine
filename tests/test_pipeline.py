@@ -5,10 +5,9 @@ import pytest
 
 
 from datetime import datetime, timezone
-from unittest.mock import patch
 
 from src.db import get_conn, init_db
-from src.repo import insert_news_items, get_run_by_day, get_run_artifacts
+from src.repo import insert_news_items, get_run_artifacts
 from src.schemas import NewsItem
 from src.llm_schemas.summary import SummaryResult
 from jobs.daily_run import main
@@ -128,7 +127,7 @@ def test_digest_written_when_summary_fails(monkeypatch, sample_items, valid_usag
 
     # Run pipeline
     from jobs.daily_run import main
-    result = main()
+    main()
 
     # Verify: digest artifact exists
     digest_path = "artifacts/digest_2026-01-22.html"

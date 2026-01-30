@@ -3,7 +3,7 @@
 Tests for source weight learning loop (Milestone 3b).
 """
 import sqlite3
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 
 import pytest
 
@@ -285,7 +285,7 @@ class TestUpsertWeightSnapshot:
         )
 
         # Re-run with different values
-        snapshot_id = upsert_weight_snapshot(
+        upsert_weight_snapshot(
             conn,
             cycle_date="2026-01-28",
             weights_before={"techcrunch": 1.1},

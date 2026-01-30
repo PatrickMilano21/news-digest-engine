@@ -1,6 +1,6 @@
 from __future__ import annotations
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import datetime
 from pydantic import BaseModel, Field
 from src.schemas import NewsItem
 

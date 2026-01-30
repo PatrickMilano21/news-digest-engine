@@ -65,4 +65,23 @@ make test                    # Run all tests
 make dev                     # Start dev server (port 8001)
 make run DATE=2026-01-15     # Run daily job
 make eval DATE=2026-01-15    # Run evaluation harness
+/agents                      # Reload agents after file changes
 ```
+
+---
+
+## Reference Docs
+
+**Claude Code:**
+- Subagents: https://docs.anthropic.com/en/docs/claude-code/sub-agents
+- Hooks: https://docs.anthropic.com/en/docs/claude-code/hooks
+- Memory/Rules: https://docs.anthropic.com/en/docs/claude-code/memory
+- MCP: https://docs.anthropic.com/en/docs/claude-code/mcp
+
+**Anthropic:**
+- Evals Guide: https://www.anthropic.com/engineering/demystifying-evals-for-ai-agents
+
+**MCPs in this project (`.mcp.json`):**
+- `verifier` — Run tests, fetch runs, UI smoke tests
+- `playwright` — Browser automation (used by ux-reviewer)
+- `browserbase` — Cloud browser (optional)

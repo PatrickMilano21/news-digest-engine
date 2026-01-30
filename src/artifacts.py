@@ -11,7 +11,6 @@ from __future__ import annotations
 import html
 
 from src.schemas import NewsItem
-from src.scoring import RankConfig
 from src.llm_schemas.summary import SummaryResult
 from src.ui_constants import Colors, Strings, format_date_short, format_datetime_friendly
 

@@ -3,7 +3,6 @@
 These tests verify that compute_cache_key() produces correct,
 deterministic, and collision-resistant cache keys.
 """
-import pytest
 
 from src.cache_utils import compute_cache_key, normalize_evidence, is_cache_expired
 from datetime import datetime, timezone, timedelta

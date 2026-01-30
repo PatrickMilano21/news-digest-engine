@@ -1,5 +1,4 @@
-from pathlib import Path
-from src.weekly_report import write_weekly_report, WEEKLY_REPORT_PATH
+from src.weekly_report import write_weekly_report
 
 
 

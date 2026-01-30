@@ -22,7 +22,6 @@ from src.repo import (
     aggregate_feedback_by_source,
     get_active_source_weights,
     upsert_weight_snapshot,
-    insert_run_artifact,
 )
 from src.weights import compute_weight_adjustments, compute_weight_changes
 from src.logging_utils import log_event
@@ -45,7 +44,6 @@ def run_evals_with_weights(weights: dict[str, float]) -> dict:
     Returns:
         Dict with 'pass_rate', 'passed', 'total'
     """
-    from datetime import datetime, timezone
     from evals.runner import run_all
 
     # Use a fixed timestamp for deterministic evals
@@ -161,10 +159,12 @@ def write_weight_artifact(
 def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(description="Run weight update cycle")
     p.add_argument("--date", required=True, help="YYYY-MM-DD cycle date")
+    p.add_argument("--user-id", default=None, help="User ID for scoped data (None = global)")
     args = p.parse_args(argv)
 
     # Validate date format
     cycle_date = date.fromisoformat(args.date).isoformat()
+    user_id = args.user_id
 
     log_event("weight_update_started", cycle_date=cycle_date)
     print(f"[WEIGHTS] Starting weight update for {cycle_date}")
@@ -182,8 +182,8 @@ def main(argv: list[str] | None = None) -> int:
         )
         print(f"[WEIGHTS] Aggregated feedback for {len(feedback_stats)} sources")
 
-        # 2. LOAD current weights
-        current_weights = get_active_source_weights(conn)
+        # 2. LOAD current weights (user-scoped)
+        current_weights = get_active_source_weights(conn, user_id=user_id)
         print(f"[WEIGHTS] Loaded {len(current_weights)} current weights")
 
         # 3. COMPUTE proposed weights
@@ -234,6 +234,7 @@ def main(argv: list[str] | None = None) -> int:
             eval_after=eval_after["pass_rate"],
             applied=applied,
             rejected_reason=rejected_reason,
+            user_id=user_id,
         )
         print(f"[WEIGHTS] Persisted snapshot_id={snapshot_id}, applied={applied}")
 

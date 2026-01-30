@@ -2,11 +2,12 @@
 from __future__ import annotations
 
 import json
+from datetime import datetime, timezone
 from pathlib import Path
 
-import pytest
-
 from src.ai_score import compute_ai_scores, build_tfidf_model
+from src.schemas import NewsItem
+from src.scoring import RankConfig, rank_items
 
 
 FIXTURES_DIR = Path("fixtures/ai_score")
@@ -153,13 +154,6 @@ class TestBuildTfidfModel:
         assert scores[1] < 0.1, f"Unrelated item should have ai_score < 0.1, got {scores[1]}"
 
 
-# --- Integration Tests: rank_items with ai_scores ---
-
-from datetime import datetime, timezone
-from src.schemas import NewsItem
-from src.scoring import RankConfig, rank_items
-
-
 class TestRankItemsWithAiScores:
     """Integration tests for rank_items() with ai_scores parameter."""
 
@@ -188,9 +182,6 @@ class TestRankItemsWithAiScores:
             "http://a.com/": 0.0,
             "http://b.com/": 0.8,
         }
-
-        # Without ai_scores, order depends on tie-break (url/idx)
-        ranked_without = rank_items([item_a, item_b], now=now, top_n=2, cfg=cfg)
 
         # With ai_scores, item_b should rank first (gets +0.08 boost)
         ranked_with = rank_items([item_a, item_b], now=now, top_n=2, cfg=cfg, ai_scores=ai_scores)

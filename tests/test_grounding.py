@@ -3,7 +3,6 @@
 These tests verify that validate_grounding() correctly enforces
 the trust boundary: citations must be exact substrings of evidence.
 """
-import pytest
 
 from src.grounding import validate_grounding
 from src.llm_schemas.summary import SummaryResult, Citation

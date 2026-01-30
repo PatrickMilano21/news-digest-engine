@@ -1,5 +1,4 @@
 """Tests for shared UI constants."""
-import pytest
 from src.ui_constants import Colors, Strings, format_date_short, format_datetime_friendly
 
 

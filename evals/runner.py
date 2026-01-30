@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 
 import os
 
-from evals.cases import EvalCase, load_cases
+from evals.cases import load_cases
 from src.rss_parse import parse_rss
 from src.scoring import rank_items
 from src.explain import explain_item

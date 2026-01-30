@@ -115,3 +115,97 @@ final_score = base_score + (0.1 * ai_score)
 - [x] New fixtures prove similarity boost works
 - [x] All call sites use ai_scores (main.py, views.py, build_digest.py, daily_run.py)
 - [x] All call sites use dynamic source weights
+
+---
+
+## Milestone 4 — Multi-User + Config (COMPLETE)
+
+**Goal:** Add user authentication, session management, and per-user isolation.
+
+### Deliverables
+
+| # | Deliverable | Status |
+|---|-------------|--------|
+| 1 | `users`, `user_configs`, `sessions` tables | DONE |
+| 2 | `user_id` columns on runs, feedback tables | DONE |
+| 3 | bcrypt password hashing (`src/auth.py`) | DONE |
+| 4 | Session management with expiry enforcement | DONE |
+| 5 | Auth endpoints (register, login, logout, me) | DONE |
+| 6 | Admin-only RBAC on `/debug/*` routes | DONE |
+| 7 | Per-user `get_effective_rank_config()` | DONE |
+| 8 | `--user-id` and `--all-users` flags in jobs | DONE |
+| 9 | 33 tests in `tests/test_auth.py` | DONE |
+| 10 | User isolation tests (runs, feedback, weights) | DONE |
+
+### Test Results
+
+```
+311 passed, 17 skipped
+```
+
+---
+
+## Review Agents — Setup (COMPLETE)
+
+**Goal:** Create 5 self-learning review agents for code quality checks.
+
+### Agents Created
+
+| Agent | Color | Purpose | Runs |
+|-------|-------|---------|------|
+| user-isolation-reviewer | blue | Detect missing `user_id` scoping | 2 |
+| test-gap-reviewer | green | Identify untested code paths | 2 |
+| scoring-integrity-reviewer | orange | Validate ranking/scoring logic | 1 |
+| cost-risk-reviewer | red | Check LLM budget guards | 1 |
+| ux-reviewer | pink | Evaluate customer-facing UI | 1 |
+
+### File Structure
+
+```
+.claude/agents/           ← Agent definitions (5 files)
+.claude/rules/{agent}/    ← Learning files per agent
+  ├── learned-patterns.md   (agent updates)
+  ├── human-overrides.md    (human corrections - always wins)
+  └── run-history.md        (audit log)
+artifacts/agent-findings.md ← Central findings (all agents write here)
+```
+
+### Self-Learning Flow
+
+1. Agent reads `human-overrides.md` first (always wins)
+2. Agent reads `learned-patterns.md` (its memory)
+3. Agent scans codebase for issues
+4. Agent writes findings to `artifacts/agent-findings.md`
+5. Agent updates its `learned-patterns.md`
+6. Agent appends to `run-history.md`
+
+---
+
+## Open Issues from Agent Reviews (2026-01-30)
+
+Issues below were found by review agents and verified. Fix before merge.
+
+| Severity | Agent | Issue | Location | Verified |
+|----------|-------|-------|----------|----------|
+| **CRITICAL** | cost-risk | Missing `day=` in `summarize()` | `daily_run.py:290` | ✓ Code |
+| **CRITICAL** | scoring | `aggregate_feedback_by_source()` missing `user_id` | `repo.py:1017` | ✓ Code |
+| **Medium** | cost-risk | Missing `day=` in `summarize()` | `build_digest.py:101` | ✓ Code |
+| **Blocking** | ux | Test articles visible to customers | UI page | ✓ Screenshot |
+
+---
+
+## Current State (2026-01-30)
+
+- **Branch:** `agent/milestone1`
+- **Tests:** 311 passed, 17 skipped
+- **Valid dates with data:** 2026-01-28, 2026-01-24, 2026-01-15, 2026-01-14, 2026-01-13
+- **Dev server:** `make dev` (port 8001)
+
+---
+
+## Next Steps
+
+1. **Fix critical bugs** found by review agents
+2. **Plan overnight automation** — see `overnightRUN.md`
+3. **Milestone 4.5** — AI Configuration Advisor (LLM feature)
+4. **Milestone 5** — Email Delivery

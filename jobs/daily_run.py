@@ -50,7 +50,11 @@ from src.repo import (
     insert_cached_summary,
     insert_run_artifact,
     update_run_llm_stats,
+    get_positive_feedback_items,
+    get_all_historical_items,
+    get_active_source_weights,
 )
+from src.ai_score import build_tfidf_model, compute_ai_scores
 
 TOP_N = 10  # Number of items to rank and summarize
 
@@ -204,9 +208,20 @@ def main() -> int:
         # =====================================================================
         ranked = []
         explanations = []
-        cfg = RankConfig()
+        # Load dynamic source weights (Milestone 3b)
+        source_weights = get_active_source_weights(conn)
+        cfg = RankConfig(source_weights=source_weights)
         try:
-            ranked = rank_items(deduped, now=now, top_n=TOP_N, cfg=cfg)
+            # Compute ai_scores (Milestone 3c)
+            # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
+            corpus = get_all_historical_items(conn, as_of_date=day)
+            positives = get_positive_feedback_items(conn, as_of_date=day)
+            model = build_tfidf_model(corpus) if corpus else None
+            item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in deduped]
+            scores = compute_ai_scores(model, positives, item_dicts)
+            ai_scores = {item_dicts[i]["url"]: scores[i] for i in range(len(scores))}
+
+            ranked = rank_items(deduped, now=now, top_n=TOP_N, cfg=cfg, ai_scores=ai_scores)
             explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
             log_event("rank_complete", run_id=run_id, ranked_count=len(ranked))
         except Exception as e:

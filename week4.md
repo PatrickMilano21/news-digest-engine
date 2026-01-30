@@ -1,7 +1,7 @@
-# Week 4 — AI Engineering Execution Plan (Progressive)
+# Week 4 — AI Engineering Execution Plan (Current)
 
 ## North Star
-Finish news-digest-engine as an operable AI system while becoming fluent at AI engineering under pressure: designing trust boundaries, enforcing contracts, running eval gates, operating user-facing surfaces, and iterating safely with AI tooling.
+Finish news-digest-engine as an operable AI system while mastering AI engineering under pressure: trust boundaries, eval gates, observability, and safe iteration.
 
 Week 4 is not about features for their own sake. It is about shipping changes safely while preserving:
 - determinism where required
@@ -12,9 +12,16 @@ Week 4 is not about features for their own sake. It is about shipping changes sa
 
 ---
 
-## What “AI Engineering” Means in This Repo
-AI engineering here is not prompt hacking. It’s system design and operation.
+## Current State (Snapshot)
+- Milestone 1: UI + HTML hardening — complete
+- Milestone 2: Cost guardrail + debug — complete
+- Milestone 3a: Feedback reasons — complete
+- Milestone 3b: Source-weight learning loop — complete
+- Milestone 3c: TF-IDF AI score — complete; integration in scoring; tests/fixtures added
 
+---
+
+## What “AI Engineering” Means Here
 AI is a component behind a boundary:
 - LLM stage is optional
 - system completes even if LLM refuses or fails
@@ -38,185 +45,169 @@ Separation of surfaces:
 - no surface leaks another’s responsibilities
 
 Learning loops must be controllable:
-- feedback can influence ranking only via explicit transforms
+- feedback influences ranking only via explicit transforms
 - bounded updates
 - before/after eval deltas
 - snapshot persistence
 
 ---
 
-## Week 4 Invariants (Non-Negotiable)
-- Deterministic core: same input → same ranking
-- Eval gated: no merge without `make test` + relevant evals passing
-- Observable: every run has run_id, failures_by_code, artifact paths
-- No runtime agents: AI tooling assists humans, never production flow
-- No silent intelligence: every tool use has explicit input/output and failure mode
-- Customer-safe: refusals and missing content must be explained plainly
+## Linting (Required)
+Add a linter to keep quality stable as the codebase grows.
+- Standard: Ruff
+- Target: `ruff check` on CI or before merge
+- Why: fast, deterministic, keeps style drift low
 
 ---
 
-## Tooling & Roles (How We Actually Work)
+## Customer vs Operator UI (Target)
+
+Customer UI (trust-first):
+- Landing: redirect to most recent `/ui/date/{date}`
+- Digest view: items + summaries/refusals + topics/tags + feedback controls
+- Run rating (stars) for overall digest
+- Left nav via hamburger menu:
+  - History: list of dates + ratings; click opens digest for that date
+  - Config: ranking preferences (phased)
+  - Settings: placeholder
+- No debug data on customer pages
+
+Operator UI (owner view):
+- Full diagnostics: run_id, failures, cost stats, artifacts, evals
+- Can inspect what customers see for support/debug
+- Strict separation from customer surfaces
+
+---
+
+## Tooling & Roles
 Roles
-- Codex (Architect/Planner): sequencing, acceptance criteria, design review
-- Claude Code (Builder): implements on branches, writes tests, refactors in-scope
-- Human (Patrick): owns correctness boundaries, reviews diffs, runs final tests, merges
+- Codex (Architect/Reviewer): sequencing, acceptance criteria, design review
+- Claude Code (Builder): implements on branches, writes tests, refactors in scope
+- Human (Patrick): correctness boundaries, review diffs, run final tests, merge
 
 Rule
 - Agents build. Tests decide. Humans approve.
 
-Hard lines (agents must not do)
-- change schemas/grounding/refusal semantics without explicit instruction
-- weaken eval rules or grading criteria
-- bypass tests or skip reproduction steps
-- commit/merge code
+Hard lines
+- no schema/grounding/refusal changes without explicit instruction
+- no weakening of eval rules
+- no skipping tests
+- no direct merges by agents
 
 ---
 
-## Progressive Learning Ladder (Week 4)
-Week 4 is structured to progressively add real AI engineering pressure.
+## MCPs, Agents, Skills (Recommended)
 
-Level 1 — Trust Surfaces (UI + Artifacts)
-Goal: Users can understand outputs + refusals; artifacts match UI; tests prevent regressions.
+MCPs
+- Verifier MCP: run tests + evals, summarize failures
+- Playwright MCP: UI smoke tests
+- Browserbase MCP: remote UI checks
 
-Level 2 — Guardrails (Cost + Failure Under Pressure)
-Goal: System degrades gracefully; cost is visible and bounded; failures are diagnosable without code.
+Agents
+- UX Reviewer: checks customer UI clarity (already defined)
+- Scoring Integrity Reviewer (optional): sanity-check that ai_score is bounded and additive
 
-Level 3 — Learning Loop (Feedback → Controlled Updates)
-Goal: System adapts using explicit transforms + eval deltas + snapshots (no model magic).
+Skills
+- Snapshot regeneration skill (HTML / UI)
+- Fixture generation skill (weights / ai_score / evals)
 
-Level 4 — Multi-user Reality (Users + Config + Isolation)
-Goal: User-scoped configs and surfaces; access boundaries; auditability.
-
-Level 5 — Delivery (Email)
-Goal: Value is delivered automatically; failures are observable; audit log captures sends.
-
----
-
-## Execution Workflow (Canonical)
-For each ticket:
-
-PLAN v1 (required)
-- Objective
-- Steps
-- Files to touch
-- Tests to add/update
-- Done when
-
-Execution loop
-- Plan exists
-- Claude builds on branch `agent/<ticket>`
-- Run tests + evals (MCPs may help run/summarize)
-- Human review (UI click + diff review + acceptance checklist)
-- Merge when green
-
-Acceptance checklist
-- Tests pass locally
-- UI clicked manually (happy + refusal case)
-- No debug-only fields leak to UI
-- Diff reviewed top-to-bottom
-- Can explain change in 2 sentences
+Hooks
+- Post-commit push (already installed)
+- Optional: eval-delta summarizer after ranking changes
 
 ---
 
-## Milestones (What We Ship, In Order)
+## Milestones (Updated)
 
-### Milestone 1 — UI & HTML Hardening (Trust Surfaces)
-AI engineering focus: user trust, refusal clarity, artifact alignment, regression safety.
-
-Deliverables
-- /ui/date/{date} is readable and customer-safe
-- Refusals are standardized and plain-English
-- Citations are readable and trust-building
-- Run summary header gives context without debug noise
-- digest_*.html is email-safe
-- Shared components prevent UI/artifact divergence
-- Snapshot + smoke tests guard against regressions
-
-Tooling guidance
-- Claude Code: templates + artifacts + tests
-- MCPs: repo navigation, test runner, diff summary
-- Skills: HTML formatting/snapshot generation if repeated
-- Hooks: optional digest-built → summarize changes (dev only)
-- Agents: allowed for template scaffolding and snapshot test boilerplate
-
-### Milestone 2 — Cost Guardrail + On-Call Debugging (Operational AI)
-AI engineering focus: guardrails, graceful degradation, cost predictability, diagnosability.
+### Milestone 4 — Multi-User + Config (Next)
+Goal: Multiple users, isolated configs, safe access.
 
 Deliverables
-- DATE-scoped daily spend cap enforced at llm_openai.py boundary
-- Mid-run: further LLM calls refuse with COST_BUDGET_EXCEEDED
-- Run completes with partial summaries
-- Customer UI shows “Summary skipped due to cost cap”
-- Debug endpoint shows refusal counts + cost stats
-
-Tooling guidance
-- Claude Code: implementation + tests
-- Context7: allowed only for verifying OpenAI/API semantics
-- MCPs: test runner + failure summary
-- Agents: scaffold only (never decide refusal semantics)
-
-### Milestone 3 — Feedback → Controlled Weight Updates (Learning Loop)
-AI engineering focus: controlled adaptation, bounded updates, eval deltas, snapshot persistence.
-
-Deliverables
-- Aggregate feedback by source
-- Compute bounded adjustments (±0.1) with weight bounds (0.5–2.0)
-- Persist weight snapshot per cycle
-- Run before/after eval comparison artifact
-- No regression in grounding/refusal rates
-
-Tooling guidance
-- Claude Code: repo helpers + wiring + tests
-- MCPs: eval delta summarization
-- Skills: fixture expansion or report formatting if repeated
-- Agents: allowed for bulk fixture generation (human approves criteria)
-
-### Milestone 4 — Real Users + Per-User Config (Multi-user Reality)
-AI engineering focus: isolation, access boundaries, per-user config, auditability.
-
-Deliverables
-- users and user_configs tables
-- Ranking scoped by user_id
-- Feedback scoped by user_id (or prepared for it)
-- Minimal auth (magic link or email/password)
+- users + user_configs tables
+- ranking scoped by user_id
+- feedback scoped by user_id
+- minimal auth (magic link or email/password)
 - RBAC stub guarding /debug/*
+- per-user weight snapshots (user_id on weight_snapshots already exists)
 
-Tooling guidance
-- Claude Code: migrations + wiring + tests
-- Context7: allowed for auth/OAuth semantics only when needed
-- Agents: scaffold auth UI/flows (human approves boundaries)
+Tests
+- user-scoped ranking test
+- user-scoped feedback test
+- auth smoke test
 
-### Milestone 5 — Email Delivery (Value Delivery)
-AI engineering focus: operational delivery, failure handling, audit trail, reuse of artifacts.
+Tooling
+- Claude Code for migrations + wiring + tests
+- Context7 for auth/OAuth semantics if needed
+
+---
+
+### Milestone 4.5 — AI Configuration Advisor (New, Aggressive AI)
+Goal: AI suggests config updates (topics/sources/recency) with evidence. User decides.
+
+Deliverables
+- Daily AI suggestion artifact (per user): top 3–5 recommended config changes
+- Evidence links: which liked/disliked items drove suggestion
+- UI surface: “Suggested updates” panel (accept/ignore)
+- Cost budget: single LLM call per user/day, capped
+
+Guardrails
+- AI suggests; system never auto-applies
+- Log suggestions + acceptance rate
+- Evals compare baseline vs suggested config (preview mode)
+
+---
+
+### Milestone 5 — Email Delivery
+Goal: System delivers the digest automatically.
 
 Deliverables
 - jobs/send_digest --date --user_id
-- SMTP integration (SendGrid/Mailgun preferred over OAuth initially)
+- SMTP integration (SendGrid/Mailgun preferred)
 - Email-safe HTML reuse
 - Audit log entries for sends
 - Tests for payload correctness
 
-Tooling guidance
-- Claude Code: implementation + tests
-- Context7: allowed if integrating a specific email SDK
-- Hooks: digest built → prepare email payload, send → audit
+---
+
+## Ingestion Strategy (Multi-User Reality)
+- Short-term: shared public RSS list (works for demos)
+- Mid-term: per-user feed lists (user_feeds table)
+- Paid sources: use official APIs or feeds; do not scrape paywalled sites
+- If a source is unsupported, show a clear UI message
 
 ---
 
-## Backlog (Explicitly De-Prioritized Until Milestones 1–5 Are Green)
-- Next.js UI rewrite
-- Full OAuth complexity (Gmail OAuth) if SMTP meets requirements
-- Redis caching, async ingestion, heavy deploy work
-- Broad agentization of runtime
+## Evals & Fixtures (Must-Have)
+- Ranking evals remain fixture-driven and deterministic
+- New fixtures for:
+  - weight updates (already added)
+  - ai_score (already added)
+  - multi-user ranking (to add)
+- Regression guard before merging
 
 ---
 
-## The Throughline
-We are learning how to build AI systems that can be:
+## Next Steps (Detailed, Immediate)
+1. Confirm ai_score applied everywhere the user sees rankings (UI + jobs + API)
+2. Add Ruff linter to repo and CI/pre-merge step
+3. Plan Milestone 4 schema + auth
+4. Add user-scoped fixtures and tests
+5. Draft AI Configuration Advisor spec (Milestone 4.5)
+
+---
+
+## Backlog (Deprioritized)
+- Next.js rewrite
+- Full OAuth (Gmail) if SMTP is sufficient
+- Redis caching / async ingestion
+- Runtime agentization
+
+---
+
+## Throughline
+We are building a system that is:
 - trusted by users
-- debugged by operators
-- improved without regressions
+- debuggable by operators
+- improvable without regressions
 - delivered automatically
 - accelerated by AI tools without losing control
-
-That is AI engineering.

@@ -37,6 +37,7 @@ def build_ranked_display_items(
     now: datetime,
     cfg: RankConfig,
     top_n: int,
+    ai_scores: dict[str, float] | None = None,
 ) -> list[dict]:
     """
     Score, rank, and build display objects with explanations and summaries.
@@ -47,15 +48,18 @@ def build_ranked_display_items(
         now: Reference time for scoring
         cfg: Ranking configuration
         top_n: Number of items to return
+        ai_scores: Optional url -> ai_score mapping (Milestone 3c)
 
     Returns:
         List of display dicts with keys: id, item, score, expl, summary
     """
-    # Score each item
+    # Score each item (base_score + ai_score boost)
     scored_pairs = []
     for idx, (db_id, item) in enumerate(items_with_ids):
-        score = score_item(item, now=now, cfg=cfg)
-        scored_pairs.append((score, item.published_at, idx, db_id, item))
+        base_score = score_item(item, now=now, cfg=cfg)
+        item_ai_score = ai_scores.get(str(item.url), 0.0) if ai_scores else 0.0
+        final_score = base_score + (cfg.ai_score_alpha * item_ai_score)
+        scored_pairs.append((final_score, item.published_at, idx, db_id, item))
 
     # Sort by score desc, published_at desc, index asc
     scored_pairs.sort(key=lambda t: (-t[0], -t[1].timestamp(), t[2]))

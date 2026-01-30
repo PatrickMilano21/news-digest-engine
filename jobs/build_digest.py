@@ -18,7 +18,10 @@ from src.repo import (
     insert_cached_summary,
     update_run_llm_stats,
     get_active_source_weights,
+    get_positive_feedback_items,
+    get_all_historical_items,
 )
+from src.ai_score import build_tfidf_model, compute_ai_scores
 from src.scoring import RankConfig, rank_items
 from src.explain import explain_item
 from src.artifacts import render_digest_html
@@ -51,7 +54,17 @@ def main(argv: list[str] | None = None) -> int:
         # Load dynamic source weights (Milestone 3b)
         source_weights = get_active_source_weights(conn)
         cfg = RankConfig(source_weights=source_weights)
-        ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+
+        # Compute ai_scores (Milestone 3c)
+        # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
+        corpus = get_all_historical_items(conn, as_of_date=day)
+        positives = get_positive_feedback_items(conn, as_of_date=day)
+        model = build_tfidf_model(corpus) if corpus else None
+        item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items]
+        scores = compute_ai_scores(model, positives, item_dicts)
+        ai_scores = {item_dicts[i]["url"]: scores[i] for i in range(len(scores))}
+
+        ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg, ai_scores=ai_scores)
         explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
 
         # Initialize run-level stats

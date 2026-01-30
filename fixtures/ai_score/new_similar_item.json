@@ -1,0 +1,12 @@
+{
+  "description": "New item similar to positive history - should receive ai_score boost",
+  "item": {
+    "url": "https://example.com/ai-startup",
+    "title": "AI Startup Raises Funding for Machine Learning Platform",
+    "evidence": "A new artificial intelligence startup secured funding to build a machine learning platform for enterprise applications."
+  },
+  "expected": {
+    "ai_score_gt": 0.1,
+    "reason": "Strong term overlap with positive history: AI, machine learning, artificial intelligence"
+  }
+}

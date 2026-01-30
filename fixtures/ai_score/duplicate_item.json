@@ -1,0 +1,12 @@
+{
+  "description": "Item with same URL as positive history - should clamp ai_score to 0",
+  "item": {
+    "url": "https://example.com/ai-breakthrough",
+    "title": "New AI Model Achieves Human-Level Performance",
+    "evidence": "Researchers announced a breakthrough in artificial intelligence with a new machine learning model."
+  },
+  "expected": {
+    "ai_score_eq": 0.0,
+    "reason": "Duplicate URL should be excluded from similarity (prevents self-match boosting)"
+  }
+}

@@ -27,7 +27,9 @@ from src.repo import (
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
     get_distinct_dates, get_daily_spend, get_daily_refusal_counts,
     get_all_item_feedback_for_run, get_active_source_weights,
+    get_positive_feedback_items, get_all_historical_items,
 )
+from src.ai_score import build_tfidf_model, compute_ai_scores
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
@@ -197,7 +199,16 @@ def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
     with db_conn() as conn:
         items = get_news_items_by_date(conn, day=date_str)
 
-    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+        # Compute ai_scores (Milestone 3c)
+        # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
+        corpus = get_all_historical_items(conn, as_of_date=date_str)
+        positives = get_positive_feedback_items(conn, as_of_date=date_str)
+        model = build_tfidf_model(corpus) if corpus else None
+        item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items]
+        scores = compute_ai_scores(model, positives, item_dicts)
+        ai_scores = {item_dicts[i]["url"]: scores[i] for i in range(len(scores))}
+
+    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg, ai_scores=ai_scores)
     return {
         "date": date_str,
         "top_n": top_n,
@@ -234,7 +245,16 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
         source_weights = get_active_source_weights(conn)
         cfg = RankConfig(source_weights=source_weights)
 
-    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg)
+        # Compute ai_scores (Milestone 3c)
+        # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
+        corpus = get_all_historical_items(conn, as_of_date=day)
+        positives = get_positive_feedback_items(conn, as_of_date=day)
+        model = build_tfidf_model(corpus) if corpus else None
+        item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items]
+        scores = compute_ai_scores(model, positives, item_dicts)
+        ai_scores = {item_dicts[i]["url"]: scores[i] for i in range(len(scores))}
+
+    ranked = rank_items(items, now=now, top_n=top_n, cfg=cfg, ai_scores=ai_scores)
     explanations = [explain_item(it, now=now, cfg=cfg) for it in ranked]
 
     # 4) render
@@ -273,7 +293,16 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
         if not items_with_ids:
             return render_ui_error(request, 404, f"No items found for {day}.")
 
-        display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n)
+        # Compute ai_scores (Milestone 3c)
+        corpus = get_all_historical_items(conn, as_of_date=day)
+        positives = get_positive_feedback_items(conn, as_of_date=day)
+        model = build_tfidf_model(corpus) if corpus else None
+        items_only = [item for _, item in items_with_ids]
+        item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items_only]
+        scores = compute_ai_scores(model, positives, item_dicts)
+        ai_scores = {item_dicts[i]["url"]: scores[i] for i in range(len(scores))}
+
+        display_items = build_ranked_display_items(conn, items_with_ids, now, cfg, top_n, ai_scores=ai_scores)
 
         # Get existing feedback for this run
         run_id = run.get("run_id") if run else None

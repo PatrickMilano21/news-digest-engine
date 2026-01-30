@@ -1,0 +1,20 @@
+{
+  "description": "3 thumbs-up items with overlapping AI/ML terms for TF-IDF similarity testing",
+  "items": [
+    {
+      "url": "https://example.com/ai-breakthrough",
+      "title": "New AI Model Achieves Human-Level Performance",
+      "evidence": "Researchers announced a breakthrough in artificial intelligence with a new machine learning model that demonstrates human-level performance on reasoning tasks."
+    },
+    {
+      "url": "https://example.com/ml-healthcare",
+      "title": "Machine Learning Transforms Healthcare Diagnostics",
+      "evidence": "Hospitals are adopting machine learning algorithms for early disease detection. The AI-powered systems analyze medical images with high accuracy."
+    },
+    {
+      "url": "https://example.com/neural-networks",
+      "title": "Deep Neural Networks Explained",
+      "evidence": "A comprehensive guide to neural network architectures used in modern artificial intelligence applications, covering transformers and attention mechanisms."
+    }
+  ]
+}

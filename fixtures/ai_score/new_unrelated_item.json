@@ -1,0 +1,12 @@
+{
+  "description": "New item unrelated to positive history - should NOT receive boost",
+  "item": {
+    "url": "https://example.com/cooking-recipes",
+    "title": "Best Summer Grilling Recipes for Backyard BBQ",
+    "evidence": "Top chefs share their favorite grilling recipes for summer barbecues, including marinades, rubs, and side dishes."
+  },
+  "expected": {
+    "ai_score_lt": 0.05,
+    "reason": "No term overlap with AI/ML positive history"
+  }
+}

@@ -1120,3 +1120,94 @@ def get_weight_snapshot(conn: sqlite3.Connection, *, cycle_date: str, user_id: s
     }
 
 
+# --- AI Score / TF-IDF Similarity (Milestone 3c) ---
+
+def get_positive_feedback_items(
+    conn: sqlite3.Connection,
+    *,
+    window_days: int | None = None,
+    as_of_date: str | None = None,
+) -> list[dict]:
+    """
+    Get items that received thumbs-up feedback for TF-IDF similarity.
+
+    Args:
+        window_days: Limit to last N days (None = all time)
+        as_of_date: Reference date for window calc (default: today)
+
+    Returns:
+        List of {url, title, evidence} dicts for positive items
+    """
+    if as_of_date is None:
+        as_of_date = datetime.now(timezone.utc).date().isoformat()
+
+    if window_days is not None:
+        as_of = datetime.strptime(as_of_date, "%Y-%m-%d").date()
+        window_start = (as_of - timedelta(days=window_days)).isoformat()
+        rows = conn.execute(
+            """
+            SELECT DISTINCT n.url, n.title, n.evidence
+            FROM item_feedback f
+            JOIN news_items n ON f.item_url = n.url
+            JOIN runs r ON f.run_id = r.run_id
+            WHERE f.useful = 1
+              AND DATE(r.started_at) >= ?
+              AND DATE(r.started_at) <= ?
+            """,
+            (window_start, as_of_date),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT DISTINCT n.url, n.title, n.evidence
+            FROM item_feedback f
+            JOIN news_items n ON f.item_url = n.url
+            WHERE f.useful = 1
+            """
+        ).fetchall()
+
+    return [{"url": r[0], "title": r[1], "evidence": r[2]} for r in rows]
+
+
+def get_all_historical_items(
+    conn: sqlite3.Connection,
+    *,
+    window_days: int | None = None,
+    as_of_date: str | None = None,
+) -> list[dict]:
+    """
+    Get all historical items for TF-IDF corpus fitting.
+
+    Args:
+        window_days: Limit to last N days (None = all time)
+        as_of_date: Reference date for window calc (default: today)
+
+    Returns:
+        List of {url, title, evidence} dicts
+    """
+    if as_of_date is None:
+        as_of_date = datetime.now(timezone.utc).date().isoformat()
+
+    if window_days is not None:
+        as_of = datetime.strptime(as_of_date, "%Y-%m-%d").date()
+        window_start = (as_of - timedelta(days=window_days)).isoformat()
+        rows = conn.execute(
+            """
+            SELECT url, title, evidence
+            FROM news_items
+            WHERE DATE(published_at) >= ?
+              AND DATE(published_at) <= ?
+            """,
+            (window_start, as_of_date),
+        ).fetchall()
+    else:
+        rows = conn.execute(
+            """
+            SELECT url, title, evidence
+            FROM news_items
+            """
+        ).fetchall()
+
+    return [{"url": r[0], "title": r[1], "evidence": r[2]} for r in rows]
+
+

@@ -1,0 +1,123 @@
+name: Overnight Agent Review
+on:
+  # Run at 2 AM UTC daily
+  schedule:
+    - cron: "0 2 * * *"
+  # Allow manual trigger for testing
+  workflow_dispatch:
+
+jobs:
+  code-review-agents:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      id-token: write
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Cost Risk Reviewer
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+            DATE: ${{ github.event.repository.updated_at }}
+
+            You are the cost-risk-reviewer agent. Read your instructions from:
+            .claude/agents/cost-risk-reviewer.md
+
+            Follow those instructions to:
+            1. Scan src/, jobs/, tests/ for cost-related patterns
+            2. Check for missing budget caps, unbounded API calls, hardcoded keys
+            3. Write findings to artifacts/agent-findings.md (cost-risk section, max 50 lines)
+            4. Update .claude/rules/cost-risk-reviewer/learned-patterns.md (keep concise)
+            5. Append run entry to .claude/rules/cost-risk-reviewer/run-history.md (keep last 10 entries)
+
+            Create a GitHub issue only if critical findings exist.
+
+          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
+          max_turns: "20"
+
+      - name: Run User Isolation Reviewer
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+
+            You are the user-isolation-reviewer agent. Read your instructions from:
+            .claude/agents/user-isolation-reviewer.md
+
+            Follow those instructions to review user data isolation.
+            Write findings to artifacts/agent-findings.md (user-isolation section, max 50 lines).
+            Keep run-history.md to last 10 entries.
+
+          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
+          max_turns: "20"
+
+      - name: Run Scoring Integrity Reviewer
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+
+            You are the scoring-integrity-reviewer agent. Read your instructions from:
+            .claude/agents/scoring-integrity-reviewer.md
+
+            Follow those instructions to review scoring/ranking logic.
+            Write findings to artifacts/agent-findings.md (scoring-integrity section, max 50 lines).
+            Keep run-history.md to last 10 entries.
+
+          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
+          max_turns: "20"
+
+      - name: Run Test Gap Reviewer
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            REPO: ${{ github.repository }}
+
+            You are the test-gap-reviewer agent. Read your instructions from:
+            .claude/agents/test-gap-reviewer.md
+
+            Follow those instructions to identify untested code paths.
+            Write findings to artifacts/agent-findings.md (test-gap section, max 50 lines).
+            Keep run-history.md to last 10 entries.
+
+          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
+          max_turns: "20"
+
+      - name: Create Summary Issue
+        uses: anthropics/claude-code-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+          prompt: |
+            Read artifacts/agent-findings.md and create a summary GitHub issue:
+
+            Title: "Overnight Review - ${{ github.run_id }}"
+
+            Include:
+            - Count of critical/medium/low issues per agent
+            - Top 3 most important findings
+            - Link to full findings file
+
+            Use: gh issue create --title "..." --body "..."
+
+          allowed_tools: "Read,Bash(gh issue:*)"
+          max_turns: "5"
+
+      - name: Commit agent artifacts
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add artifacts/ .claude/rules/
+          git diff --staged --quiet || git commit -m "Overnight review artifacts - $(date +%Y-%m-%d)"
+          git push

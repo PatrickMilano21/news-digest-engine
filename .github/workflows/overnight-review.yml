@@ -42,7 +42,7 @@ jobs:
             Create a GitHub issue only if critical findings exist.
 
           claude_args: |
-            --max-turns 20
+            --max-turns 50
             --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run User Isolation Reviewer
@@ -60,7 +60,7 @@ jobs:
             Keep run-history.md to last 10 entries.
 
           claude_args: |
-            --max-turns 20
+            --max-turns 50
             --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run Scoring Integrity Reviewer
@@ -78,7 +78,7 @@ jobs:
             Keep run-history.md to last 10 entries.
 
           claude_args: |
-            --max-turns 20
+            --max-turns 50
             --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run Test Gap Reviewer
@@ -96,7 +96,7 @@ jobs:
             Keep run-history.md to last 10 entries.
 
           claude_args: |
-            --max-turns 20
+            --max-turns 50
             --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Create Summary Issue

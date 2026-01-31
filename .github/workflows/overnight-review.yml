@@ -43,7 +43,7 @@ jobs:
 
           claude_args: |
             --max-turns 20
-            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
+            --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run User Isolation Reviewer
         uses: anthropics/claude-code-action@v1
@@ -61,7 +61,7 @@ jobs:
 
           claude_args: |
             --max-turns 20
-            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
+            --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run Scoring Integrity Reviewer
         uses: anthropics/claude-code-action@v1
@@ -79,7 +79,7 @@ jobs:
 
           claude_args: |
             --max-turns 20
-            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
+            --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run Test Gap Reviewer
         uses: anthropics/claude-code-action@v1
@@ -97,7 +97,7 @@ jobs:
 
           claude_args: |
             --max-turns 20
-            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
+            --allowedTools Edit,Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Create Summary Issue
         uses: anthropics/claude-code-action@v1

@@ -41,8 +41,9 @@ jobs:
 
             Create a GitHub issue only if critical findings exist.
 
-          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
-          max_turns: "20"
+          claude_args: |
+            --max-turns 20
+            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run User Isolation Reviewer
         uses: anthropics/claude-code-action@v1
@@ -58,8 +59,9 @@ jobs:
             Write findings to artifacts/agent-findings.md (user-isolation section, max 50 lines).
             Keep run-history.md to last 10 entries.
 
-          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
-          max_turns: "20"
+          claude_args: |
+            --max-turns 20
+            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run Scoring Integrity Reviewer
         uses: anthropics/claude-code-action@v1
@@ -75,8 +77,9 @@ jobs:
             Write findings to artifacts/agent-findings.md (scoring-integrity section, max 50 lines).
             Keep run-history.md to last 10 entries.
 
-          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
-          max_turns: "20"
+          claude_args: |
+            --max-turns 20
+            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Run Test Gap Reviewer
         uses: anthropics/claude-code-action@v1
@@ -92,8 +95,9 @@ jobs:
             Write findings to artifacts/agent-findings.md (test-gap section, max 50 lines).
             Keep run-history.md to last 10 entries.
 
-          allowed_tools: "Read,Write,Glob,Grep,Bash(gh issue:*)"
-          max_turns: "20"
+          claude_args: |
+            --max-turns 20
+            --allowedTools Read,Write,Glob,Grep,Bash(gh issue:*)
 
       - name: Create Summary Issue
         uses: anthropics/claude-code-action@v1
@@ -111,8 +115,9 @@ jobs:
 
             Use: gh issue create --title "..." --body "..."
 
-          allowed_tools: "Read,Bash(gh issue:*)"
-          max_turns: "5"
+          claude_args: |
+            --max-turns 5
+            --allowedTools Read,Bash(gh issue:*)
 
       - name: Commit agent artifacts
         run: |

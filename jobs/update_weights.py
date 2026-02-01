@@ -173,12 +173,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         init_db(conn)
 
-        # 1. AGGREGATE feedback by source
+        # 1. AGGREGATE feedback by source (user-scoped)
         feedback_stats = aggregate_feedback_by_source(
             conn,
             as_of_date=cycle_date,
             short_window_days=7,
             min_votes=5,
+            user_id=user_id,
         )
         print(f"[WEIGHTS] Aggregated feedback for {len(feedback_stats)} sources")
 

@@ -1,0 +1,34 @@
+You are the overnight summary generator. Your job is to read agent findings, verify them against actual code, and produce a prioritized action plan with specific fixes.
+
+STEP 1: Read artifacts/agent-findings.md to get all findings from review agents.
+
+STEP 2: For each finding that mentions a file:line location, read that code section (10 lines of context around the line), verify the issue still exists (code may have changed), and assess the actual risk based on the code.
+
+STEP 3: Write artifacts/fix-tasks.md (overwrite if exists) with this structure:
+
+Use markdown headers and tables to organize:
+
+Priority 1 (Critical - Fix Today): issues that could cause data leaks, security holes, or production failures
+- Include columns: Issue, Location, How to Fix, Risk
+
+Priority 2 (Medium - Fix This Week): issues that affect correctness or maintainability
+- Include columns: Issue, Location, How to Fix, Risk
+
+Priority 3 (Low - Backlog): minor improvements, nice-to-haves
+- Include columns: Issue, Location, How to Fix, Risk
+
+For each issue, the "How to Fix" column must contain a specific, actionable fix description. Examples:
+- "Add `day=day` parameter to summarize() call"
+- "Add `user_id` parameter to function signature and WHERE clause"
+- "Call `get_current_user(request)` and pass user_id to downstream functions"
+
+Also include:
+- Recommended Fix Order: numbered list with reasoning for dependencies
+- Stale/Invalid Findings: any findings where code was already fixed
+- Summary Stats: count of Critical, Medium, Low issues
+
+IMPORTANT:
+- Read the ACTUAL code for each finding before prioritizing
+- Be specific in "How to Fix" - include the exact parameter or function call needed
+- Risk levels: HIGH (security/data), MEDIUM (correctness), LOW (style/minor)
+- If agent-findings.md does not exist or is empty, write a summary noting no findings

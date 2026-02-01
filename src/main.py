@@ -329,9 +329,11 @@ def ingest_raw(payload: IngestRequest, request: Request):
 
 
 @app.get("/runs/latest")
-def latest_run():
+def latest_run(request: Request):
     with db_conn() as conn:
-        latest = get_latest_run(conn)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+        latest = get_latest_run(conn, user_id=user_id)
 
     if latest is None:
         raise HTTPException(status_code=404, detail="No runs found")
@@ -340,7 +342,7 @@ def latest_run():
 
 
 @app.post("/rank/{date_str}")
-def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
+def rank_for_date(request: Request, date_str: str, cfg: RankConfig, top_n: int =10):
     try:
         date.fromisoformat(date_str)
     except ValueError:
@@ -352,12 +354,15 @@ def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
     now = datetime.fromisoformat(f"{date_str}T23:59:59+00:00")
 
     with db_conn() as conn:
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+
         items = get_news_items_by_date(conn, day=date_str)
 
         # Compute ai_scores (Milestone 3c)
         # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
         corpus = get_all_historical_items(conn, as_of_date=date_str)
-        positives = get_positive_feedback_items(conn, as_of_date=date_str)
+        positives = get_positive_feedback_items(conn, as_of_date=date_str, user_id=user_id)
         model = build_tfidf_model(corpus) if corpus else None
         item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items]
         scores = compute_ai_scores(model, positives, item_dicts)
@@ -373,7 +378,7 @@ def rank_for_date(date_str: str, cfg: RankConfig, top_n: int =10):
 
 
 @app.get("/digest/{date_str}", response_class=HTMLResponse)
-def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
+def get_digest(request: Request, date_str: str, top_n: int = 10) -> HTMLResponse:
     # 1) validate date + deterministic now
     try:
         day = date.fromisoformat(date_str).isoformat()
@@ -389,7 +394,10 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
 
     # 2) DB reads
     with db_conn() as conn:
-        run = get_run_by_day(conn, day=day)
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+
+        run = get_run_by_day(conn, day=day, user_id=user_id)
         items = get_news_items_by_date(conn, day=day)
 
         # If literally nothing exists, return a 404 (ProblemDetails JSON handled by middleware)
@@ -397,13 +405,13 @@ def get_digest(date_str: str, top_n: int = 10) -> HTMLResponse:
             raise HTTPException(status_code=404, detail="No data found for this day")
 
         # 3) rank + explain with dynamic weights (Milestone 3b)
-        source_weights = get_active_source_weights(conn)
+        source_weights = get_active_source_weights(conn, user_id=user_id)
         cfg = RankConfig(source_weights=source_weights)
 
         # Compute ai_scores (Milestone 3c)
         # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
         corpus = get_all_historical_items(conn, as_of_date=day)
-        positives = get_positive_feedback_items(conn, as_of_date=day)
+        positives = get_positive_feedback_items(conn, as_of_date=day, user_id=user_id)
         model = build_tfidf_model(corpus) if corpus else None
         item_dicts = [{"url": str(it.url), "title": it.title, "evidence": it.evidence} for it in items]
         scores = compute_ai_scores(model, positives, item_dicts)
@@ -698,6 +706,10 @@ async def submit_run_feedback(
     """
     request_id = request.state.request_id
     with db_conn() as conn:
+        # Get current user for scoped feedback
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+
         # 1. Check idempotency key FIRST (prevents double-click duplicates)
         if idempotency_key:
             cached = get_idempotency_response(conn, key=idempotency_key)
@@ -721,6 +733,7 @@ async def submit_run_feedback(
             comment=body.comment,
             created_at=now,
             updated_at=now,
+            user_id=user_id,
         )
 
         response_data = {
@@ -768,6 +781,10 @@ async def submit_item_feedback(
     """
     request_id = request.state.request_id
     with db_conn() as conn:
+        # Get current user for scoped feedback
+        user = get_current_user(request, conn)
+        user_id = user["user_id"] if user else None
+
         # Check idempotency key
         if idempotency_key:
             cached = get_idempotency_response(conn, key=idempotency_key)
@@ -793,6 +810,7 @@ async def submit_item_feedback(
             reason_tag=body.reason_tag,
             created_at=now,
             updated_at=now,
+            user_id=user_id,
         )
 
         response_data = {

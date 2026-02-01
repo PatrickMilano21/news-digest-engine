@@ -50,7 +50,7 @@ def main(argv: list[str] | None = None) -> int:
     conn = get_conn()
     try:
         init_db(conn)
-        run = get_run_by_day(conn, day=day)
+        run = get_run_by_day(conn, day=day, user_id=user_id)
         items = get_news_items_by_date(conn, day=day)
 
         # Load dynamic source weights (user-scoped, Milestone 3b + 4)
@@ -98,7 +98,7 @@ def main(argv: list[str] | None = None) -> int:
                 llm_stats["saved_cost_usd"] += cached["cost_usd"]
             else:
                 #CACHE MISS - call LLM
-                raw_result, usage = summarize(item, item.evidence)
+                raw_result, usage = summarize(item, item.evidence, day=day)
                 validated = validate_grounding(raw_result, item.evidence)
 
                 #ONLY cache successful grounded results (no refusales)

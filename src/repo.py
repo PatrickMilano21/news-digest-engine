@@ -1020,6 +1020,7 @@ def aggregate_feedback_by_source(
     as_of_date: str,
     short_window_days: int = 7,
     min_votes: int = 5,
+    user_id: str | None = None,
 ) -> dict:
     """
     Aggregate item feedback by source with blended rates.
@@ -1030,6 +1031,7 @@ def aggregate_feedback_by_source(
         as_of_date: YYYY-MM-DD date to compute stats as of
         short_window_days: Days for short-term rate (default 7)
         min_votes: Minimum total votes to include source (default 5)
+        user_id: Filter by user_id. None = global/legacy feedback (user_id IS NULL).
 
     Returns:
         Dict mapping source to stats dict with keys:
@@ -1043,10 +1045,18 @@ def aggregate_feedback_by_source(
     as_of = datetime.strptime(as_of_date, "%Y-%m-%d").date()
     window_start = (as_of - timedelta(days=short_window_days)).isoformat()
 
+    # Build user filter clause
+    if user_id is None:
+        user_filter = "f.user_id IS NULL"
+        user_params: tuple = ()
+    else:
+        user_filter = "f.user_id = ?"
+        user_params = (user_id,)
+
     # Query: join item_feedback → runs → news_items, group by source
     # Get both all-time and 7-day stats in one query using conditional aggregation
     rows = conn.execute(
-        """
+        f"""
         SELECT
             n.source,
             COUNT(*) as total,
@@ -1057,10 +1067,11 @@ def aggregate_feedback_by_source(
         JOIN runs r ON f.run_id = r.run_id
         JOIN news_items n ON f.item_url = n.url
         WHERE DATE(r.started_at) <= ?
+          AND {user_filter}
         GROUP BY n.source
         HAVING COUNT(*) >= ?
         """,
-        (window_start, window_start, as_of_date, min_votes),
+        (window_start, window_start, as_of_date) + user_params + (min_votes,),
     ).fetchall()
 
     result = {}

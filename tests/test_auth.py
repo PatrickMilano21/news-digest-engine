@@ -389,6 +389,52 @@ class TestAdminAccess:
         assert resp.json()["status"] == "created"
         assert resp.json()["email"] == "newuser@test.com"
 
+    def test_register_duplicate_email_409(self, client):
+        """POST /auth/register returns 409 for duplicate email."""
+        # Create admin and existing user
+        conn = get_conn()
+        try:
+            init_db(conn)
+            password_hash = hash_password("adminpass")
+            create_user(conn, email="admin@test.com", password_hash=password_hash, role="admin")
+            create_user(conn, email="existing@test.com", password_hash=hash_password("pass"))
+        finally:
+            conn.close()
+
+        # Login as admin
+        client.post("/auth/login", params={"email": "admin@test.com", "password": "adminpass"})
+
+        # Try to register with duplicate email
+        resp = client.post("/auth/register", params={"email": "existing@test.com", "password": "newpass"})
+
+        assert resp.status_code == 409
+        # ProblemDetails uses 'message' field
+        assert resp.json()["message"] == "Email already registered"
+
+    def test_login_null_password_hash(self, client):
+        """POST /auth/login returns 401 for OAuth-only user (NULL password_hash)."""
+        # Create user with NULL password_hash (simulating OAuth-only user)
+        conn = get_conn()
+        try:
+            init_db(conn)
+            now = datetime.now(timezone.utc).isoformat()
+            # Directly insert user with NULL password_hash
+            conn.execute(
+                "INSERT INTO users (user_id, email, password_hash, role, created_at) VALUES (?, ?, NULL, 'user', ?)",
+                ("oauth-user-id", "oauth@test.com", now),
+            )
+            conn.commit()
+        finally:
+            conn.close()
+
+        # Attempt password login
+        resp = client.post("/auth/login", params={"email": "oauth@test.com", "password": "anypass"})
+
+        # Should fail with same error as wrong password (no info leak)
+        assert resp.status_code == 401
+        # ProblemDetails uses 'message' field
+        assert resp.json()["message"] == "Invalid email or password"
+
 
 class TestUserIsolation:
     """Tests verifying user data isolation."""

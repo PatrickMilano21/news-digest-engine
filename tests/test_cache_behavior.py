@@ -116,7 +116,7 @@ def test_cache_miss_calls_llm(monkeypatch, sample_item, valid_summary_result, va
     # Track if summarize was called
     call_count = {"value": 0}
     
-    def mock_summarize(item, evidence):
+    def mock_summarize(item, evidence, day=None):
         call_count["value"] += 1
         return valid_summary_result, valid_usage
 
@@ -145,9 +145,9 @@ def test_successful_result_cached(monkeypatch, sample_item, valid_summary_result
     conn.close()
     
     # Mock summarize to return valid result
-    def mock_summarize(item, evidence):
+    def mock_summarize(item, evidence, day=None):
         return valid_summary_result, valid_usage
-    
+
     monkeypatch.setattr("jobs.build_digest.summarize", mock_summarize)
 
     # Run build_digest
@@ -181,10 +181,10 @@ def test_refusal_not_cached(monkeypatch, sample_item, valid_usage):
     
     # Mock summarize to return refusal
     refusal_result = SummaryResult(refusal="LLM_PARSE_FAIL")
-    
-    def mock_summarize(item, evidence):
+
+    def mock_summarize(item, evidence, day=None):
         return refusal_result, valid_usage
-    
+
     monkeypatch.setattr("jobs.build_digest.summarize", mock_summarize)
 
     # Run build_digest
@@ -227,7 +227,7 @@ def test_grounding_fail_not_cached(monkeypatch, sample_item, valid_usage):
         confidence=0.9
     )
     
-    def mock_summarize(item, evidence):
+    def mock_summarize(item, evidence, day=None):
         return bad_result, valid_usage
 
     monkeypatch.setattr("jobs.build_digest.summarize", mock_summarize)
@@ -236,7 +236,7 @@ def test_grounding_fail_not_cached(monkeypatch, sample_item, valid_usage):
     from jobs.build_digest import main
     result = main(["--date", "2026-01-22"])
     assert result == 0
-    
+
     # Verify cache is empty (grounding failed, so not cached)
     conn = get_conn()
     cache_key = compute_cache_key(MODEL, sample_item.evidence or "")

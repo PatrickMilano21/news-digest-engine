@@ -287,7 +287,7 @@ def run_for_user(day: str, mode: str, force: bool, user_id: str | None) -> int:
                     llm_stats["cache_hits"] += 1
                     llm_stats["saved_cost_usd"] += cached["cost_usd"]
                 else:
-                    raw_result, usage = summarize(item, item.evidence)
+                    raw_result, usage = summarize(item, item.evidence, day=day)
                     validated = validate_grounding(raw_result, item.evidence)
 
                     if validated.refusal is None:

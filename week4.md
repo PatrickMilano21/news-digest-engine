@@ -13,11 +13,217 @@ Week 4 is not about features for their own sake. It is about shipping changes sa
 ---
 
 ## Current State (Snapshot)
-- Milestone 1: UI + HTML hardening — complete
-- Milestone 2: Cost guardrail + debug — complete
-- Milestone 3a: Feedback reasons — complete
-- Milestone 3b: Source-weight learning loop — complete
-- Milestone 3c: TF-IDF AI score — complete; integration in scoring; tests/fixtures added
+- Milestone 1: UI + HTML hardening — COMPLETE
+- Milestone 2: Cost guardrail + debug — COMPLETE
+- Milestone 3a: Feedback reasons — COMPLETE
+- Milestone 3b: Source-weight learning loop — COMPLETE
+- Milestone 3c: TF-IDF AI score — COMPLETE
+- Milestone 4: User auth + sessions + per-user isolation — COMPLETE
+- Review agents: 5 self-learning agents — COMPLETE
+- Overnight automation: 7-step workflow — COMPLETE + TESTED
+- Codex cost controls: $1 cap, retry, pre-flight — COMPLETE
+- End-to-end testing: Both paths verified — COMPLETE
+- Tests: 313 passed, 17 skipped
+
+---
+
+## Week 4 Accomplishments (to date)
+
+### Milestone 4 — Multi-User Authentication (COMPLETE)
+**What:** Added user authentication, session management, and per-user data isolation across the entire system.
+
+**Why it matters:** Without user isolation, feedback from one user would pollute another's rankings. A multi-user system requires strict boundaries so each user's preferences evolve independently.
+
+**Why we did it:** The weight learning loop (Milestone 3b) and TF-IDF AI score (3c) are user-specific features. They only make sense when feedback is scoped to the individual.
+
+**Deliverables:**
+- `users`, `user_configs`, `sessions` tables
+- bcrypt password hashing in `src/auth.py`
+- Session expiry enforcement
+- Auth endpoints (register, login, logout, me)
+- Admin-only RBAC on `/debug/*` routes
+- `--user-id` flags on all jobs
+- 33 tests in `tests/test_auth.py`
+
+---
+
+### Review Agents — Self-Learning Code Reviewers (COMPLETE)
+**What:** Created 5 specialized review agents that scan the codebase, write findings, and learn from each run.
+
+**Why it matters:** Automated code review catches issues humans miss. Self-learning means agents improve over time without manual rule updates. Human overrides ensure agents don't repeat mistakes.
+
+**Why we did it:** As the codebase grows, manual review doesn't scale. Agents provide consistent coverage for security (user isolation), correctness (scoring integrity), cost control, and test coverage.
+
+**Agents created:**
+| Agent | Purpose |
+|-------|---------|
+| cost-risk-reviewer | Detect unbounded API calls, missing budget caps |
+| user-isolation-reviewer | Find missing `user_id` scoping that could leak data |
+| scoring-integrity-reviewer | Validate ranking/scoring logic integrity |
+| test-gap-reviewer | Identify untested code paths |
+| ux-reviewer | Evaluate customer-facing UI (manual/on-demand) |
+
+**Learning structure:**
+```
+.claude/agents/{agent}.md           ← Agent definition
+.claude/rules/{agent}/
+  ├── learned-patterns.md           ← Agent updates after each run
+  ├── human-overrides.md            ← Human corrections (always wins)
+  └── run-history.md                ← Audit log
+artifacts/agent-findings.md         ← Consolidated findings
+```
+
+---
+
+### Overnight Automation — Two-Phase Implementation (COMPLETE)
+**What:** Automated overnight agent runs that produce findings for morning review.
+
+**Why it matters:** Code review shouldn't wait for human availability. Running agents overnight means issues are surfaced before the next work session, reducing feedback loops from days to hours.
+
+**Why we did it:** Manual agent invocation is tedious and easy to forget. Automation ensures consistent coverage. Two-phase approach gives flexibility (GitHub for proven CI, local for free runs).
+
+#### Phase 1: GitHub Actions (PROVEN)
+**File:** `.github/workflows/overnight-review.yml`
+
+Successfully tested workflow that:
+- Runs 4 code agents sequentially (serial execution per best practices)
+- Each agent reads its instructions from `.claude/agents/{agent}.md`
+- Writes findings to `artifacts/agent-findings.md`
+- Updates learned patterns and run history
+- Creates summary GitHub issue
+- Commits artifacts back to repo
+
+**Key learnings during implementation:**
+- `claude_args` format with `--max-turns` and `--allowedTools` flags (not direct parameters)
+- `git add -f` needed for `.gitignore`'d directories
+- Workflow must exist on default branch to appear in Actions tab
+- 50 max turns sufficient for review agents
+
+#### Phase 2: Local Script (COMPLETE)
+**File:** `scripts/overnight_local.bat`
+
+Free alternative using Claude subscription (not API credits):
+- Same 4 agents as GitHub Actions
+- Run manually or via Windows Task Scheduler
+- Includes summary generator step
+
+**Usage:**
+```powershell
+scripts\overnight_local.bat           # Run all agents + summary
+scripts\overnight_local.bat summary   # Run only summary step
+```
+
+---
+
+### Summary Generator — Prioritized Action Plans (COMPLETE)
+**What:** A 5th step that reads agent findings, verifies against actual code, and produces a prioritized morning action plan.
+
+**Why it matters:** Raw agent findings are verbose. The summary extracts what matters, prioritizes by risk, and explains why each issue needs fixing. This is what you actually read in the morning.
+
+**Why we did it:** Following Anthropic's artifact-based coordination pattern. Agents write raw findings, summary agent reads and synthesizes. Verification against actual code catches stale findings.
+
+**Output structure:**
+```markdown
+# Overnight Summary - 2026-01-31
+
+## Priority 1 (Critical - Fix Today)
+| Issue | Location | Why This Matters | Risk | Agent |
+
+## Priority 2 (Medium - Fix This Week)
+...
+
+## Recommended Fix Order
+1. Fix X first because... (dependencies)
+2. Then Y...
+
+## Stale/Invalid Findings
+(findings where code was already fixed)
+```
+
+**Follows Anthropic patterns:**
+- Artifact-based coordination (agents → findings → summary)
+- Verification before acting (reads actual code)
+- Lightweight references (concise tables, not full dumps)
+- Chained from main script (not nested subagents)
+
+---
+
+### Morning Review Workflow — Claude + Codex Loop (DOCUMENTED)
+**What:** Defined the human-in-the-loop review process for acting on overnight findings.
+
+**Why it matters:** Automation finds issues; humans decide fixes. The Claude → Codex → Claude → Codex loop provides multi-model validation before changes ship.
+
+**Flow:**
+```
+Overnight: Agents run → findings → summary
+Morning:   Human reads summary
+           → Claude proposes fix tasks (STATUS.md)
+           → Codex reviews plan (second opinion)
+           → Claude implements fixes
+           → Codex verifies changes
+           → Human approves/rejects
+           → make test confirms
+```
+
+**Script:** `scripts/overnight_local.bat`
+
+---
+
+### Codex Cost Controls — Production Safety (COMPLETE)
+**What:** Added comprehensive cost controls to the Codex review step (Step 6).
+
+**Why it matters:** OpenAI API calls cost money. Without guards, a malformed or oversized prompt could cause runaway costs. The $1 cap ensures overnight automation never surprises with a large bill.
+
+**Implemented controls:**
+| Control | Value | Purpose |
+|---------|-------|---------|
+| Hard cost cap | $1.00 | Fail if estimated cost exceeds |
+| Token pre-flight | 50,000 max | Fail if prompt too large |
+| Retry with backoff | 3 attempts | Handle 429/500/503 transient errors |
+| Cost logging | Footer in fix-tasks.md | Visibility into actual spend |
+
+**Actual costs observed:** $0.01-0.04 per run (well under cap).
+
+---
+
+### End-to-End Workflow Testing (COMPLETE)
+**What:** Tested the full 7-step overnight workflow including the "no issues found" edge case.
+
+**Why it matters:** The workflow must handle both "issues found" and "clean codebase" paths gracefully. Testing proves both paths work correctly before relying on automation.
+
+**Test results:**
+| Scenario | Steps Run | Result |
+|----------|-----------|--------|
+| Issues found | All 7 | Fixes implemented, 313 tests pass |
+| No issues | 5-7 | Codex responds "Codebase looks clean", no changes made |
+
+**Edge cases grilled:**
+| Issue | Verdict |
+|-------|---------|
+| Step 5 fails | Accept - visible failure |
+| UX agent missing | Intentional - requires server |
+| Bash access risk | Accept - branch isolation |
+| Concurrent runs | Accept - rare |
+| make test hang | **Fixed** - added 5min timeout |
+
+---
+
+### Implementation Agent Timeout (COMPLETE)
+**What:** Added 5-minute timeout rule for `make test` in Step 7.
+
+**Why it matters:** Test suite takes ~108 seconds normally, but default Bash timeout is 120 seconds. Only 10% buffer. As tests grow, could timeout on valid runs.
+
+**Change:** Added to `scripts/implement-prompt.txt`:
+```
+- Use 5 minute timeout (300000ms) for `make test` to allow for test suite growth
+```
+
+---
+
+### Documentation Updates
+- `STATUS.md`: Current state, milestone tracking
+- `week4.md`: Completed work summaries (this file)
+- `future.md`: Deferred/backlog items
 
 ---
 
@@ -188,11 +394,12 @@ Deliverables
 ---
 
 ## Next Steps (Detailed, Immediate)
-1. Confirm ai_score applied everywhere the user sees rankings (UI + jobs + API)
-2. Add Ruff linter to repo and CI/pre-merge step
-3. Plan Milestone 4 schema + auth
-4. Add user-scoped fixtures and tests
+1. ~~Fix critical bugs found by review agents~~ ✅ DONE (see STATUS.md Fixed Issues)
+2. ~~Add OpenAI integration~~ ✅ DONE (Codex review in Step 6)
+3. **Merge to claude-edits** — Review changes, run tests, merge branch
+4. Add Ruff linter to repo and CI/pre-merge step
 5. Draft AI Configuration Advisor spec (Milestone 4.5)
+6. Plan Email Delivery (Milestone 5)
 
 ---
 

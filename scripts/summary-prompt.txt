@@ -24,7 +24,6 @@ For each issue, the "How to Fix" column must contain a specific, actionable fix 
 
 Also include:
 - Recommended Fix Order: numbered list with reasoning for dependencies
-- Stale/Invalid Findings: any findings where code was already fixed
 - Summary Stats: count of Critical, Medium, Low issues
 
 IMPORTANT:

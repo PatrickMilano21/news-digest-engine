@@ -1,7 +1,7 @@
 """Tests for authentication and user management (Milestone 4)."""
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 import pytest
 from fastapi.testclient import TestClient
 

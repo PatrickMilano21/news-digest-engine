@@ -16,7 +16,7 @@ Codex is the architect/reviewer and operates read-only by default.
 
 ## Non-Responsibilities
 - No code edits unless explicitly enabled
-- No changes to CLAUDE.md or STATUS.md (owned by Claude)
+- No changes to CLAUDE.md or STATUS.md unless explicitly requested by Patrick
 
 ## AI Engineering Leverage (Required When Helpful)
 - MCPs: repo navigation, test runner, diff/eval summarization, log grouping
@@ -45,3 +45,27 @@ Before PLAN v1, explicitly look for high-leverage tool use:
 - No plan -> no code
 - No acceptance checklist -> no merge
 - Agents build, humans decide correctness
+
+## Git Workflow (Commit & Merge)
+When Patrick instructs a commit, follow this exact sequence:
+
+1. Stage changes (on `agent/milestone1`)
+   - `git add <files>`
+   - For ignored directories:
+     - `git add -f .claude/rules/`
+     - `git add -f artifacts/`
+2. Commit
+   - `git commit -m "Description of changes
+
+Co-Authored-By: Claude Opus 4.5 <noreply@anthropic.com>"`
+3. Push feature branch
+   - `git push`
+4. Merge to main
+   - `git checkout main`
+   - `git merge agent/milestone1`
+   - `git push`
+5. Go back to feature branch & sync
+   - `git checkout agent/milestone1`
+   - `git merge main`
+
+Result: both branches aligned, ready for the next task.

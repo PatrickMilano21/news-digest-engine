@@ -25,7 +25,7 @@ from src.repo import (
     get_run_failures_with_sources, get_run_artifacts,
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
-    get_distinct_dates, get_daily_spend, get_daily_refusal_counts,
+    get_daily_spend, get_daily_refusal_counts,
     get_all_item_feedback_for_run, get_active_source_weights,
     get_positive_feedback_items, get_all_historical_items,
     create_user, get_user_by_email, get_user_by_id,

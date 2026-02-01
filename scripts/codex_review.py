@@ -141,7 +141,7 @@ def main():
                 max_tokens=4000
             )
             break  # Success, exit retry loop
-        except RateLimitError as e:
+        except RateLimitError:
             delay = RETRY_DELAY_SECONDS * (2 ** attempt)
             print(f"Rate limited (attempt {attempt + 1}/{MAX_RETRIES}), retrying in {delay}s...")
             time.sleep(delay)

@@ -9,7 +9,12 @@ Execution rules for Claude Code. Read this first. Do not rely on chat memory.
 
 ## Execution Mode
 
-Claude Code is a **primary implementer** on feature branches (`agent/<task>`), never on `main`.
+Claude Code is a **primary implementer** on feature branches (`agent/<task>`).
+
+**Branch workflow:**
+- Work on `agent/milestone1` (or similar feature branch)
+- When task complete → Patrick merges to `main`
+- Sync branches (`git merge main`) before next task
 
 Claude is allowed to:
 - Edit files on the current branch
@@ -17,7 +22,7 @@ Claude is allowed to:
 - Write and run tests
 
 Claude must NEVER:
-- Write to `main` branch
+- Push directly to `main` branch
 - Run `git commit`, `git merge`, or `git push`
 - Change schemas, eval logic, or grounding semantics
 - Bypass tests

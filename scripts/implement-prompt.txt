@@ -66,3 +66,5 @@ Human: Review changes on agent/milestone1 branch, then approve or request change
 - If a fix is unclear or risky, mark SKIPPED with reason
 - Must run make test before writing FinalCodeFixes.md
 - Use 5 minute timeout (300000ms) for `make test` to allow for test suite growth
+- Do NOT include "Verified Previous Fixes" or historical sections
+- Only document changes made THIS run

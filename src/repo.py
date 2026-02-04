@@ -969,6 +969,51 @@ def get_all_item_feedback_for_run(
     }
 
 
+def get_all_item_feedback_by_user(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+) -> list[dict]:
+    """Get all item feedback for a user across all runs.
+
+    Returns feedback joined with news_items for title/source metadata.
+    Used by advisor tools to analyze user preferences.
+
+    Args:
+        user_id: User ID to get feedback for
+
+    Returns:
+        List of dicts with: url, title, source, useful, reason_tag, feedback_date
+    """
+    cur = conn.execute(
+        """
+        SELECT
+            f.item_url,
+            n.title,
+            n.source,
+            f.useful,
+            f.reason_tag,
+            f.created_at
+        FROM item_feedback f
+        LEFT JOIN news_items n ON f.item_url = n.url
+        WHERE f.user_id = ?
+        ORDER BY f.created_at DESC
+        """,
+        (user_id,)
+    )
+    return [
+        {
+            "url": row[0],
+            "title": row[1] or "Unknown",
+            "source": row[2] or "unknown",
+            "useful": row[3],
+            "reason_tag": row[4],
+            "feedback_date": row[5],
+        }
+        for row in cur.fetchall()
+    ]
+
+
 # --- Feedback Tag Caching (Milestone 3a) ---
 
 def get_cached_tags(conn: sqlite3.Connection, *, item_id: int) -> list[str] | None:
@@ -1654,4 +1699,584 @@ def get_all_users(conn: sqlite3.Connection) -> list[dict]:
         for row in rows
     ]
 
+
+# --- Config Suggestions (Milestone 4.5) ---
+
+def insert_suggestion(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    suggestion_type: str,
+    field: str,
+    target_key: str | None = None,
+    current_value: str | None,
+    suggested_value: str,
+    evidence_items: list[dict],
+    reason: str,
+) -> int:
+    """
+    Insert a new config suggestion.
+
+    Args:
+        user_id: User ID
+        suggestion_type: 'add_topic', 'remove_topic', 'boost_source', 'reduce_source'
+        field: 'topics' or 'source_weights'
+        target_key: Source name for boost/reduce (e.g., "techcrunch"), None for topics
+        current_value: Current value (None for add operations)
+        suggested_value: Suggested new value
+        evidence_items: List of evidence dicts [{url, title, feedback, reason_tag, item_id?}]
+        reason: Human-readable explanation
+
+    Returns:
+        suggestion_id of the new suggestion
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    evidence_json = json.dumps(evidence_items)
+    evidence_count = len(evidence_items)
+
+    cur = conn.execute(
+        """
+        INSERT INTO config_suggestions
+        (user_id, suggestion_type, field, target_key, current_value, suggested_value,
+         evidence_items, evidence_count, reason, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        """,
+        (user_id, suggestion_type, field, target_key, current_value, suggested_value,
+         evidence_json, evidence_count, reason, now),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_pending_suggestions(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    status: str = "pending",
+) -> list[dict]:
+    """
+    Get suggestions for a user filtered by status.
+
+    Args:
+        user_id: User ID
+        status: Status filter (default 'pending')
+
+    Returns:
+        List of suggestion dicts
+    """
+    rows = conn.execute(
+        """
+        SELECT suggestion_id, user_id, suggestion_type, field, target_key,
+               current_value, suggested_value, evidence_items, evidence_count,
+               reason, status, created_at, resolved_at
+        FROM config_suggestions
+        WHERE user_id = ? AND status = ?
+        ORDER BY created_at DESC
+        """,
+        (user_id, status),
+    ).fetchall()
+
+    return [
+        {
+            "suggestion_id": row[0],
+            "user_id": row[1],
+            "suggestion_type": row[2],
+            "field": row[3],
+            "target_key": row[4],
+            "current_value": row[5],
+            "suggested_value": row[6],
+            "evidence_items": json.loads(row[7]) if row[7] else [],
+            "evidence_count": row[8],
+            "reason": row[9],
+            "status": row[10],
+            "created_at": row[11],
+            "resolved_at": row[12],
+        }
+        for row in rows
+    ]
+
+
+def get_suggestion_by_id(
+    conn: sqlite3.Connection,
+    *,
+    suggestion_id: int,
+) -> dict | None:
+    """
+    Get a single suggestion by ID.
+
+    Returns:
+        Suggestion dict or None if not found
+    """
+    row = conn.execute(
+        """
+        SELECT suggestion_id, user_id, suggestion_type, field, target_key,
+               current_value, suggested_value, evidence_items, evidence_count,
+               reason, status, created_at, resolved_at
+        FROM config_suggestions
+        WHERE suggestion_id = ?
+        """,
+        (suggestion_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "suggestion_id": row[0],
+        "user_id": row[1],
+        "suggestion_type": row[2],
+        "field": row[3],
+        "target_key": row[4],
+        "current_value": row[5],
+        "suggested_value": row[6],
+        "evidence_items": json.loads(row[7]) if row[7] else [],
+        "evidence_count": row[8],
+        "reason": row[9],
+        "status": row[10],
+        "created_at": row[11],
+        "resolved_at": row[12],
+    }
+
+
+def update_suggestion_status(
+    conn: sqlite3.Connection,
+    *,
+    suggestion_id: int,
+    status: str,
+) -> None:
+    """
+    Update a suggestion's status.
+
+    Args:
+        suggestion_id: Suggestion ID
+        status: New status ('accepted', 'rejected', 'superseded')
+    """
+    now = datetime.now(timezone.utc).isoformat()
+    conn.execute(
+        """
+        UPDATE config_suggestions
+        SET status = ?, resolved_at = ?
+        WHERE suggestion_id = ?
+        """,
+        (status, now, suggestion_id),
+    )
+    conn.commit()
+
+
+def get_suggestions_for_today(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    day: str,
+) -> list[dict]:
+    """
+    Get all suggestions created for a user on a specific day.
+    Used for idempotency check.
+
+    Args:
+        user_id: User ID
+        day: Date string (YYYY-MM-DD)
+
+    Returns:
+        List of suggestion dicts created on that day
+    """
+    rows = conn.execute(
+        """
+        SELECT suggestion_id, user_id, suggestion_type, field, current_value,
+               suggested_value, evidence_items, evidence_count, reason, status,
+               created_at, resolved_at
+        FROM config_suggestions
+        WHERE user_id = ? AND date(created_at) = ?
+        ORDER BY created_at DESC
+        """,
+        (user_id, day),
+    ).fetchall()
+
+    return [
+        {
+            "suggestion_id": row[0],
+            "user_id": row[1],
+            "suggestion_type": row[2],
+            "field": row[3],
+            "current_value": row[4],
+            "suggested_value": row[5],
+            "evidence_items": json.loads(row[6]) if row[6] else [],
+            "evidence_count": row[7],
+            "reason": row[8],
+            "status": row[9],
+            "created_at": row[10],
+            "resolved_at": row[11],
+        }
+        for row in rows
+    ]
+
+
+# --- Suggestion Outcomes (Milestone 4.5) ---
+
+def insert_outcome(
+    conn: sqlite3.Connection,
+    *,
+    suggestion_id: int,
+    user_id: str,
+    suggestion_type: str,
+    suggestion_value: str,
+    outcome: str,
+    user_reason: str | None = None,
+    config_before: dict | None = None,
+    config_after: dict | None = None,
+    evidence_summary: list[dict] | None = None,
+) -> int:
+    """
+    Insert a suggestion outcome (accept/reject snapshot).
+
+    Args:
+        suggestion_id: Related suggestion ID
+        user_id: User ID
+        suggestion_type: Type of suggestion
+        suggestion_value: The suggested value
+        outcome: 'accepted', 'rejected', 'expired', 'superseded'
+        user_reason: Optional user-provided reason
+        config_before: Config state before (JSON-serializable)
+        config_after: Config state after (JSON-serializable, None for rejections)
+        evidence_summary: Compact evidence snapshot
+
+    Returns:
+        outcome_id of the new outcome
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    cur = conn.execute(
+        """
+        INSERT INTO suggestion_outcomes
+        (suggestion_id, user_id, suggestion_type, suggestion_value, outcome,
+         user_reason, config_before, config_after, evidence_summary,
+         created_at, decided_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            suggestion_id,
+            user_id,
+            suggestion_type,
+            suggestion_value,
+            outcome,
+            user_reason,
+            json.dumps(config_before) if config_before else None,
+            json.dumps(config_after) if config_after else None,
+            json.dumps(evidence_summary) if evidence_summary else None,
+            now,
+            now,
+        ),
+    )
+    conn.commit()
+    return cur.lastrowid
+
+
+def get_outcomes_by_user(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    limit: int = 50,
+) -> list[dict]:
+    """
+    Get recent outcomes for a user.
+
+    Args:
+        user_id: User ID
+        limit: Max results (default 50)
+
+    Returns:
+        List of outcome dicts, most recent first
+    """
+    rows = conn.execute(
+        """
+        SELECT outcome_id, suggestion_id, user_id, suggestion_type, suggestion_value,
+               outcome, user_reason, config_before, config_after, evidence_summary,
+               created_at, decided_at
+        FROM suggestion_outcomes
+        WHERE user_id = ?
+        ORDER BY created_at DESC
+        LIMIT ?
+        """,
+        (user_id, limit),
+    ).fetchall()
+
+    return [
+        {
+            "outcome_id": row[0],
+            "suggestion_id": row[1],
+            "user_id": row[2],
+            "suggestion_type": row[3],
+            "suggestion_value": row[4],
+            "outcome": row[5],
+            "user_reason": row[6],
+            "config_before": json.loads(row[7]) if row[7] else None,
+            "config_after": json.loads(row[8]) if row[8] else None,
+            "evidence_summary": json.loads(row[9]) if row[9] else None,
+            "created_at": row[10],
+            "decided_at": row[11],
+        }
+        for row in rows
+    ]
+
+
+def get_outcomes_by_type(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    suggestion_type: str,
+) -> list[dict]:
+    """
+    Get outcomes for a user filtered by suggestion type.
+
+    Args:
+        user_id: User ID
+        suggestion_type: Type filter (e.g., 'boost_source')
+
+    Returns:
+        List of outcome dicts
+    """
+    rows = conn.execute(
+        """
+        SELECT outcome_id, suggestion_id, user_id, suggestion_type, suggestion_value,
+               outcome, user_reason, config_before, config_after, evidence_summary,
+               created_at, decided_at
+        FROM suggestion_outcomes
+        WHERE user_id = ? AND suggestion_type = ?
+        ORDER BY created_at DESC
+        """,
+        (user_id, suggestion_type),
+    ).fetchall()
+
+    return [
+        {
+            "outcome_id": row[0],
+            "suggestion_id": row[1],
+            "user_id": row[2],
+            "suggestion_type": row[3],
+            "suggestion_value": row[4],
+            "outcome": row[5],
+            "user_reason": row[6],
+            "config_before": json.loads(row[7]) if row[7] else None,
+            "config_after": json.loads(row[8]) if row[8] else None,
+            "evidence_summary": json.loads(row[9]) if row[9] else None,
+            "created_at": row[10],
+            "decided_at": row[11],
+        }
+        for row in rows
+    ]
+
+
+def is_target_on_cooldown(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    target_value: str,
+    cooldown_days: int = 10,
+) -> bool:
+    """
+    Check if a target (source or topic) is on cooldown.
+
+    A target is on cooldown if it was suggested OR resolved within the cooldown window.
+    This prevents re-suggesting the same target too frequently.
+
+    Args:
+        user_id: User ID
+        target_value: The target to check (source name or topic)
+        cooldown_days: Number of days for cooldown window (default 10)
+
+    Returns:
+        True if target is on cooldown (should not be suggested), False otherwise
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(days=cooldown_days)).isoformat()
+
+    row = conn.execute(
+        """
+        SELECT COUNT(*) FROM suggestion_outcomes
+        WHERE user_id = ?
+          AND suggestion_value = ?
+          AND (created_at > ? OR decided_at > ?)
+        """,
+        (user_id, target_value, cutoff, cutoff),
+    ).fetchone()
+
+    return row[0] > 0
+
+
+# --- User Preference Profiles (Milestone 4.5) ---
+
+def get_user_profile(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+) -> dict | None:
+    """
+    Get a user's preference profile.
+
+    Returns:
+        Profile dict or None if not exists
+    """
+    row = conn.execute(
+        """
+        SELECT profile_id, user_id, acceptance_stats, patterns, trends,
+               total_outcomes, last_outcome_at, computed_at
+        FROM user_preference_profiles
+        WHERE user_id = ?
+        """,
+        (user_id,),
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    return {
+        "profile_id": row[0],
+        "user_id": row[1],
+        "acceptance_stats": json.loads(row[2]) if row[2] else {},
+        "patterns": json.loads(row[3]) if row[3] else {},
+        "trends": json.loads(row[4]) if row[4] else None,
+        "total_outcomes": row[5],
+        "last_outcome_at": row[6],
+        "computed_at": row[7],
+    }
+
+
+def upsert_user_profile(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    acceptance_stats: dict,
+    patterns: dict,
+    trends: dict | None = None,
+    total_outcomes: int = 0,
+    last_outcome_at: str | None = None,
+) -> None:
+    """
+    Create or update a user's preference profile.
+
+    Args:
+        user_id: User ID
+        acceptance_stats: {type: {accepted, rejected, rate}}
+        patterns: {pattern_name: bool/value}
+        trends: Optional {engagement, stability, velocity}
+        total_outcomes: Total outcomes processed
+        last_outcome_at: Timestamp of last outcome
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    conn.execute(
+        """
+        INSERT INTO user_preference_profiles
+        (user_id, acceptance_stats, patterns, trends, total_outcomes,
+         last_outcome_at, computed_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(user_id) DO UPDATE SET
+            acceptance_stats = excluded.acceptance_stats,
+            patterns = excluded.patterns,
+            trends = excluded.trends,
+            total_outcomes = excluded.total_outcomes,
+            last_outcome_at = excluded.last_outcome_at,
+            computed_at = excluded.computed_at
+        """,
+        (
+            user_id,
+            json.dumps(acceptance_stats),
+            json.dumps(patterns),
+            json.dumps(trends) if trends else None,
+            total_outcomes,
+            last_outcome_at,
+            now,
+        ),
+    )
+    conn.commit()
+
+
+def increment_profile_stats(
+    conn: sqlite3.Connection,
+    *,
+    user_id: str,
+    suggestion_type: str,
+    outcome: str,
+) -> None:
+    """
+    Increment acceptance stats for a user after accept/reject.
+
+    Args:
+        user_id: User ID
+        suggestion_type: 'add_topic', 'remove_topic', 'boost_source', 'reduce_source'
+        outcome: 'accepted' or 'rejected'
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Get current profile or create empty
+    profile = get_user_profile(conn, user_id=user_id)
+    if profile:
+        acceptance_stats = profile["acceptance_stats"]
+        patterns = profile["patterns"]
+        trends = profile["trends"]
+        total_outcomes = profile["total_outcomes"]
+    else:
+        acceptance_stats = {}
+        patterns = {}
+        trends = None
+        total_outcomes = 0
+
+    # Ensure suggestion_type exists in stats
+    if suggestion_type not in acceptance_stats:
+        acceptance_stats[suggestion_type] = {"accepted": 0, "rejected": 0, "rate": 0.0}
+
+    # Increment the appropriate counter
+    if outcome == "accepted":
+        acceptance_stats[suggestion_type]["accepted"] += 1
+    elif outcome == "rejected":
+        acceptance_stats[suggestion_type]["rejected"] += 1
+
+    # Recalculate rate
+    accepted = acceptance_stats[suggestion_type]["accepted"]
+    rejected = acceptance_stats[suggestion_type]["rejected"]
+    total = accepted + rejected
+    acceptance_stats[suggestion_type]["rate"] = round(accepted / total, 2) if total > 0 else 0.0
+
+    # Increment total outcomes
+    total_outcomes += 1
+
+    # Upsert profile
+    upsert_user_profile(
+        conn,
+        user_id=user_id,
+        acceptance_stats=acceptance_stats,
+        patterns=patterns,
+        trends=trends,
+        total_outcomes=total_outcomes,
+        last_outcome_at=now,
+    )
+
+
+# --- Cost Tracking by Run Type (Milestone 4.5) ---
+
+def get_daily_spend_by_type(
+    conn: sqlite3.Connection,
+    *,
+    day: str,
+    run_type: str,
+) -> float:
+    """
+    Get total LLM spend for a specific day and run type.
+
+    Args:
+        day: Date string (YYYY-MM-DD)
+        run_type: 'ingest' or 'advisor'
+
+    Returns:
+        Total cost in USD for that day and run type
+    """
+    row = conn.execute(
+        """
+        SELECT COALESCE(SUM(llm_total_cost_usd), 0.0)
+        FROM runs
+        WHERE date(started_at) = ? AND run_type = ?
+        """,
+        (day, run_type),
+    ).fetchone()
+
+    return row[0] if row else 0.0
 

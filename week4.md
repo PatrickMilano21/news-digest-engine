@@ -23,6 +23,8 @@ Week 4 is not about features for their own sake. It is about shipping changes sa
 - Overnight automation: 7-step workflow — COMPLETE + TESTED
 - Codex cost controls: $1 cap, retry, pre-flight — COMPLETE
 - End-to-end testing: Both paths verified — COMPLETE
+- Ruff linter: `make lint` — COMPLETE
+- **Milestone 4.5: AI Config Advisor Agent — IN PROGRESS** (see AGENT_DESIGN.md)
 - Tests: 313 passed, 17 skipped
 
 ---
@@ -221,9 +223,11 @@ Morning:   Human reads summary
 ---
 
 ### Documentation Updates
-- `STATUS.md`: Current state, milestone tracking
+- `STATUS.md`: Current state, milestone tracking, data model
 - `week4.md`: Completed work summaries (this file)
 - `future.md`: Deferred/backlog items
+- `AGENT_DESIGN.md`: Config advisor agent architecture (NEW)
+- `AI_CAPABILITIES.md`: All AI patterns — agents, MCPs, hooks, memory (NEW)
 
 ---
 
@@ -302,24 +306,30 @@ Hard lines
 
 ---
 
-## MCPs, Agents, Skills (Recommended)
+## MCPs, Agents, Skills (Current + Planned)
 
-MCPs
+**See `AI_CAPABILITIES.md` for full details.**
+
+MCPs (Active)
 - Verifier MCP: run tests + evals, summarize failures
 - Playwright MCP: UI smoke tests
-- Browserbase MCP: remote UI checks
+- Browserbase MCP: remote UI checks (optional)
 
-Agents
-- UX Reviewer: checks customer UI clarity (already defined)
-- Scoring Integrity Reviewer (optional): sanity-check that ai_score is bounded and additive
+Agents (Active)
+- cost-risk-reviewer: unbounded API calls, missing budget caps
+- user-isolation-reviewer: missing user_id scoping
+- scoring-integrity-reviewer: ranking/scoring logic
+- test-gap-reviewer: untested code paths
+- ux-reviewer: customer UI clarity (on-demand)
+- **config-advisor (NEW)**: suggests config improvements based on feedback
 
-Skills
-- Snapshot regeneration skill (HTML / UI)
-- Fixture generation skill (weights / ai_score / evals)
+Skills (Planned for config-advisor)
+- suggestion-safety-check: inline validation
+- suggestion-eval: fixture-based regression testing
 
-Hooks
-- Post-commit push (already installed)
-- Optional: eval-delta summarizer after ranking changes
+Hooks (Planned)
+- post-accept-hook: backup config, log analytics
+- pre-digest-hook: nudge about pending suggestions
 
 ---
 
@@ -347,19 +357,35 @@ Tooling
 
 ---
 
-### Milestone 4.5 — AI Configuration Advisor (New, Aggressive AI)
-Goal: AI suggests config updates (topics/sources/recency) with evidence. User decides.
+### Milestone 4.5 — AI Configuration Advisor Agent (IN PROGRESS)
+Goal: Build a **full AI agent** that analyzes user feedback and suggests config improvements.
+
+**Why an agent (not just a job)?**
+- Exploratory reasoning — discovers patterns, not just executes steps
+- Rich tool environment — queries DB, validates suggestions, self-critiques
+- Iterative refinement — generate → evaluate → improve cycle
+- Memory and learning — tracks what users accept/reject over time
+
+**v1 Scope:** Topics + sources only. Recency deferred to v2.
 
 Deliverables
-- Daily AI suggestion artifact (per user): top 3–5 recommended config changes
-- Evidence links: which liked/disliked items drove suggestion
-- UI surface: “Suggested updates” panel (accept/ignore)
-- Cost budget: single LLM call per user/day, capped
+- Agent definition: `.claude/agents/config-advisor.md`
+- Reasoning loop: explore → hypothesize → validate → critique → present
+- Tool set: query feedback, compute stats, validate grounding, self-critique
+- Memory: `suggestion_outcomes` table + 3-layer retrieval pattern
+- UI surface: "Suggested updates" panel in `/ui/config`
+- Invocation: user-triggered (UI) + scheduled (every 7 days)
 
 Guardrails
 - AI suggests; system never auto-applies
-- Log suggestions + acceptance rate
-- Evals compare baseline vs suggested config (preview mode)
+- Evidence required for every suggestion
+- Self-critique before presenting
+- Log suggestions + acceptance rate for learning
+
+**Design Documents:**
+- `AGENT_DESIGN.md` — Agent architecture, persona, tools, reasoning
+- `AI_CAPABILITIES.md` — Skills, hooks, MCPs, memory patterns
+- `STATUS.md` — Data model, API endpoints, acceptance criteria
 
 ---
 
@@ -394,12 +420,17 @@ Deliverables
 ---
 
 ## Next Steps (Detailed, Immediate)
-1. ~~Fix critical bugs found by review agents~~ ✅ DONE (see STATUS.md Fixed Issues)
+1. ~~Fix critical bugs found by review agents~~ ✅ DONE
 2. ~~Add OpenAI integration~~ ✅ DONE (Codex review in Step 6)
-3. **Merge to claude-edits** — Review changes, run tests, merge branch
-4. Add Ruff linter to repo and CI/pre-merge step
-5. Draft AI Configuration Advisor spec (Milestone 4.5)
-6. Plan Email Delivery (Milestone 5)
+3. ~~Merge to main~~ ✅ DONE (removed claude-edits intermediate branch)
+4. ~~Add Ruff linter~~ ✅ DONE (`make lint`)
+5. ~~Draft AI Configuration Advisor spec~~ ✅ DONE (see AGENT_DESIGN.md)
+6. **Build config-advisor agent** — IN PROGRESS
+   - Create `.claude/agents/config-advisor.md`
+   - Implement agent tools (query, validate, critique)
+   - Add memory tables and 3-layer retrieval
+   - Build UI panel in `/ui/config`
+7. Plan Email Delivery (Milestone 5) — NEXT
 
 ---
 

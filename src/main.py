@@ -2,6 +2,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
+import copy
 import json
 import uuid
 
@@ -26,18 +27,23 @@ from src.repo import (
     get_news_item_by_id, get_news_items_by_date_with_ids, get_idempotency_response,
     store_idempotency_response, upsert_run_feedback, upsert_item_feedback,
     get_daily_spend, get_daily_refusal_counts,
-    get_all_item_feedback_for_run, get_active_source_weights,
+    get_all_item_feedback_for_run,
     get_positive_feedback_items, get_all_historical_items,
     create_user, get_user_by_email, get_user_by_id,
     create_session, get_session, delete_session, update_user_last_login,
+    # Suggestion API (Milestone 4.5 Step 3)
+    get_pending_suggestions, get_suggestion_by_id, update_suggestion_status,
+    get_suggestions_for_today, insert_outcome, get_user_config, upsert_user_config,
+    increment_profile_stats,
 )
+from src.advisor_tools import query_user_feedback
 from src.auth import hash_password, verify_password
 from src.ai_score import build_tfidf_model, compute_ai_scores
 from src.normalize import normalize_and_dedupe
 from src.scoring import RankConfig, rank_items
 from src.artifacts import render_digest_html
 from src.explain import explain_item
-from src.views import build_ranked_display_items, build_homepage_data, build_debug_stats
+from src.views import build_ranked_display_items, build_homepage_data, build_debug_stats, get_effective_rank_config
 
 
 app = FastAPI()
@@ -270,6 +276,132 @@ def ui_settings(request: Request):
     )
 
 
+@app.get("/ui/suggestions", response_class=HTMLResponse)
+def ui_suggestions(request: Request):
+    """
+    Suggestions page - view and resolve AI-generated config suggestions.
+
+    Auth required. Redirects to home if not authenticated.
+    Server-renders pending suggestions grouped by type.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+        if not user:
+            return RedirectResponse(url="/", status_code=302)
+
+        user_id = user["user_id"]
+
+        # Get pending suggestions
+        suggestions = get_pending_suggestions(conn, user_id=user_id, status="pending")
+
+        # Group by type and build display data
+        source_suggestions = []
+        topic_suggestions = []
+
+        for s in suggestions:
+            suggestion_type = s["suggestion_type"]
+            target_key = s["target_key"]
+            suggested_value = s["suggested_value"]
+            current_value = s["current_value"]
+            reason = s["reason"]
+            evidence_count = s["evidence_count"] or 0
+
+            # Safe display name for sources (fallback for legacy/bad data)
+            source_name = target_key if target_key else "Unknown source"
+
+            # Build friendly headline and details
+            if suggestion_type == "boost_source":
+                headline = f"Show me more from {source_name}"
+                icon = "📈"
+                boost_label = _compute_boost_label(current_value, suggested_value, "boost")
+                details_text = _format_weight_details(current_value, suggested_value)
+            elif suggestion_type == "reduce_source":
+                headline = f"Show me less from {source_name}"
+                icon = "📉"
+                boost_label = _compute_boost_label(current_value, suggested_value, "reduction")
+                details_text = _format_weight_details(current_value, suggested_value)
+            elif suggestion_type == "add_topic":
+                headline = f"Add '{suggested_value}' to your interests"
+                icon = "➕"
+                boost_label = None
+                details_text = "This will add the topic to your interests"
+            elif suggestion_type == "remove_topic":
+                headline = f"Remove '{suggested_value}' from your interests"
+                icon = "➖"
+                boost_label = None
+                details_text = "This will remove the topic from your interests"
+            else:
+                headline = f"Unknown suggestion type: {suggestion_type}"
+                icon = "❓"
+                boost_label = None
+                details_text = ""
+
+            display_item = {
+                "suggestion_id": s["suggestion_id"],
+                "suggestion_type": suggestion_type,
+                "headline": headline,
+                "icon": icon,
+                "boost_label": boost_label,
+                "reason": reason,
+                "evidence_count": evidence_count,
+                "details_text": details_text,
+                "current_value": current_value,
+                "suggested_value": suggested_value,
+            }
+
+            if suggestion_type in ("boost_source", "reduce_source"):
+                source_suggestions.append(display_item)
+            else:
+                topic_suggestions.append(display_item)
+
+        return templates.TemplateResponse(
+            request,
+            "suggestions.html",
+            {
+                "source_suggestions": source_suggestions,
+                "topic_suggestions": topic_suggestions,
+                "total_count": len(suggestions),
+            }
+        )
+
+
+def _compute_boost_label(current_value: str | None, suggested_value: str | None, direction: str) -> str | None:
+    """
+    Compute friendly boost label (Small/Moderate/Big) based on weight delta.
+
+    Returns None if either value is missing or non-numeric.
+    """
+    if not current_value or not suggested_value:
+        return None
+    try:
+        current = float(current_value)
+        suggested = float(suggested_value)
+        delta = abs(suggested - current)
+
+        if delta <= 0.15:
+            size = "Small"
+        elif delta <= 0.25:
+            size = "Moderate"
+        else:
+            size = "Big"
+
+        return f"{size} {direction}"
+    except (ValueError, TypeError):
+        return None
+
+
+def _format_weight_details(current_value: str | None, suggested_value: str | None) -> str:
+    """Format weight details for the Details toggle. Returns neutral text if values aren't numeric."""
+    if not current_value or not suggested_value:
+        return "Weight adjustment"
+    try:
+        current = float(current_value)
+        suggested = float(suggested_value)
+        return f"Current: {current:.1f} → Proposed: {suggested:.1f}"
+    except (ValueError, TypeError):
+        return "Weight adjustment"
+
+
 @app.get("/health")
 def health(request: Request):
     request_id = request.state.request_id
@@ -404,9 +536,8 @@ def get_digest(request: Request, date_str: str, top_n: int = 10) -> HTMLResponse
         if run is None and not items:
             raise HTTPException(status_code=404, detail="No data found for this day")
 
-        # 3) rank + explain with dynamic weights (Milestone 3b)
-        source_weights = get_active_source_weights(conn, user_id=user_id)
-        cfg = RankConfig(source_weights=source_weights)
+        # 3) rank + explain with effective config (merges defaults + user_config + active_weights)
+        cfg = get_effective_rank_config(conn, user_id=user_id)
 
         # Compute ai_scores (Milestone 3c)
         # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only
@@ -450,9 +581,8 @@ def ui_date(request: Request, date_str: str, top_n: int = 10):
         user = get_current_user(request, conn)
         user_id = user["user_id"] if user else None
 
-        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
-        source_weights = get_active_source_weights(conn, user_id=user_id)
-        cfg = RankConfig(source_weights=source_weights)
+        # Load effective rank config (merges defaults + user_config + active_weights)
+        cfg = get_effective_rank_config(conn, user_id=user_id)
 
         items_with_ids = get_news_items_by_date_with_ids(conn, day=day)
         run = get_run_by_day(conn, day=day, user_id=user_id)
@@ -515,9 +645,8 @@ def ui_item(request: Request, item_id: int):
         item, day = result
         now = datetime.fromisoformat(f"{day}T23:59:59+00:00")
 
-        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
-        source_weights = get_active_source_weights(conn, user_id=user_id)
-        cfg = RankConfig(source_weights=source_weights)
+        # Load effective rank config (merges defaults + user_config + active_weights)
+        cfg = get_effective_rank_config(conn, user_id=user_id)
 
     expl = explain_item(item, now=now, cfg=cfg)
 
@@ -847,6 +976,444 @@ async def submit_item_feedback(
             headers={"X-Request-ID": request_id}
         )
 
+
+# --- Suggestion API Endpoints (Milestone 4.5 Step 3) ---
+
+@app.get("/api/suggestions")
+def api_get_suggestions(request: Request):
+    """
+    Get pending suggestions for the current user.
+
+    Returns list of pending suggestions with all fields.
+    Auth required.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        user_id = user["user_id"]
+        suggestions = get_pending_suggestions(conn, user_id=user_id, status="pending")
+
+        return {
+            "suggestions": [
+                {
+                    "suggestion_id": s["suggestion_id"],
+                    "suggestion_type": s["suggestion_type"],
+                    "field": s["field"],
+                    "target_key": s["target_key"],
+                    "current_value": s["current_value"],
+                    "suggested_value": s["suggested_value"],
+                    "reason": s["reason"],
+                    "evidence_count": s["evidence_count"],
+                    "status": s["status"],
+                    "created_at": s["created_at"],
+                }
+                for s in suggestions
+            ],
+            "count": len(suggestions),
+        }
+
+
+@app.post("/api/suggestions/generate")
+def api_generate_suggestions(request: Request):
+    """
+    Trigger suggestion generation for the current user.
+
+    Check order:
+    1. If pending suggestions exist → blocked_pending
+    2. If suggestions created today → already_generated
+    3. Check data sufficiency → skipped or ready
+
+    Auth required.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        user_id = user["user_id"]
+
+        # Check 1: Any pending suggestions?
+        pending = get_pending_suggestions(conn, user_id=user_id, status="pending")
+        if pending:
+            return {
+                "status": "blocked_pending",
+                "pending_count": len(pending),
+                "suggestion_ids": [s["suggestion_id"] for s in pending],
+            }
+
+        # Check 2: Any suggestions created today (any status)?
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        today_suggestions = get_suggestions_for_today(conn, user_id=user_id, day=today)
+        if today_suggestions:
+            return {
+                "status": "already_generated",
+                "suggestion_ids": [s["suggestion_id"] for s in today_suggestions],
+            }
+
+        # Check 3: Data sufficiency
+        feedback_result = query_user_feedback(conn, user_id=user_id)
+        if feedback_result.get("insufficient_data"):
+            return {
+                "status": "skipped",
+                "reason": feedback_result.get("reason", "Insufficient feedback data"),
+            }
+
+        # Check 4: Can we run the advisor?
+        try:
+            from src.advisor import run_advisor, OPENAI_API_KEY as _advisor_key
+            if not _advisor_key:
+                return {"status": "ready", "can_generate": True}
+        except Exception:
+            return {"status": "ready", "can_generate": True}
+
+        # Run the advisor agent (sync, blocking)
+        result = run_advisor(user_id, conn)
+        return result
+
+
+@app.post("/api/suggestions/{suggestion_id}/accept")
+def api_accept_suggestion(request: Request, suggestion_id: int):
+    """
+    Accept a suggestion - updates config and stores outcome.
+
+    Auth required. User must own the suggestion.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        user_id = user["user_id"]
+
+        # Get suggestion and validate ownership
+        suggestion = get_suggestion_by_id(conn, suggestion_id=suggestion_id)
+        if not suggestion:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        if suggestion["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not your suggestion")
+
+        # Check if already resolved
+        if suggestion["status"] != "pending":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "already_resolved",
+                    "current_status": suggestion["status"],
+                    "suggestion_id": suggestion_id,
+                },
+            )
+
+        # Get current config (before snapshot)
+        current_config = get_user_config(conn, user_id=user_id)
+        config_before = current_config if current_config else {}
+
+        # Build new config (deep copy to preserve before snapshot)
+        config_after = copy.deepcopy(config_before)
+
+        suggestion_type = suggestion["suggestion_type"]
+        target_key = suggestion["target_key"]
+        suggested_value = suggestion["suggested_value"]
+
+        # Apply change based on suggestion_type
+        if suggestion_type == "add_topic":
+            topics = config_after.get("topics", [])
+            if suggested_value not in topics:
+                topics.append(suggested_value)
+            config_after["topics"] = topics
+
+        elif suggestion_type == "remove_topic":
+            topics = config_after.get("topics", [])
+            if suggested_value in topics:
+                topics.remove(suggested_value)
+            config_after["topics"] = topics
+
+        elif suggestion_type in ("boost_source", "reduce_source"):
+            # Guard: target_key required for source suggestions
+            if not target_key:
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "missing_target_key",
+                        "suggestion_id": suggestion_id,
+                        "suggestion_type": suggestion_type,
+                    },
+                )
+            # Parse weight
+            try:
+                weight = float(suggested_value)
+            except (ValueError, TypeError):
+                return JSONResponse(
+                    status_code=400,
+                    content={
+                        "error": "invalid_weight",
+                        "suggestion_id": suggestion_id,
+                        "value": suggested_value,
+                    },
+                )
+            source_weights = config_after.get("source_weights", {})
+            source_weights[target_key] = weight
+            config_after["source_weights"] = source_weights
+
+        # Save updated config
+        upsert_user_config(conn, user_id=user_id, config=config_after)
+
+        # Update suggestion status
+        update_suggestion_status(conn, suggestion_id=suggestion_id, status="accepted")
+
+        # Compute outcome value (target, not numeric weight)
+        outcome_value = target_key if target_key else suggested_value
+
+        # Insert outcome
+        outcome_id = insert_outcome(
+            conn,
+            suggestion_id=suggestion_id,
+            user_id=user_id,
+            suggestion_type=suggestion_type,
+            suggestion_value=outcome_value,
+            outcome="accepted",
+            config_before=config_before,
+            config_after=config_after,
+            evidence_summary=suggestion["evidence_items"],
+        )
+
+        # Update profile stats
+        increment_profile_stats(
+            conn,
+            user_id=user_id,
+            suggestion_type=suggestion_type,
+            outcome="accepted",
+        )
+
+        return {
+            "success": True,
+            "suggestion_id": suggestion_id,
+            "config_updated": True,
+            "outcome_id": outcome_id,
+        }
+
+
+@app.post("/api/suggestions/{suggestion_id}/reject")
+def api_reject_suggestion(request: Request, suggestion_id: int):
+    """
+    Reject a suggestion - stores outcome only, no config change.
+
+    Auth required. User must own the suggestion.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        user_id = user["user_id"]
+
+        # Get suggestion and validate ownership
+        suggestion = get_suggestion_by_id(conn, suggestion_id=suggestion_id)
+        if not suggestion:
+            raise HTTPException(status_code=404, detail="Suggestion not found")
+        if suggestion["user_id"] != user_id:
+            raise HTTPException(status_code=403, detail="Not your suggestion")
+
+        # Check if already resolved
+        if suggestion["status"] != "pending":
+            return JSONResponse(
+                status_code=409,
+                content={
+                    "error": "already_resolved",
+                    "current_status": suggestion["status"],
+                    "suggestion_id": suggestion_id,
+                },
+            )
+
+        # Get current config for snapshot (no change)
+        current_config = get_user_config(conn, user_id=user_id)
+        config_before = current_config if current_config else {}
+
+        # Update suggestion status
+        update_suggestion_status(conn, suggestion_id=suggestion_id, status="rejected")
+
+        # Compute outcome value (target, not numeric weight)
+        target_key = suggestion["target_key"]
+        suggested_value = suggestion["suggested_value"]
+        outcome_value = target_key if target_key else suggested_value
+
+        # Insert outcome (no config_after since no change)
+        outcome_id = insert_outcome(
+            conn,
+            suggestion_id=suggestion_id,
+            user_id=user_id,
+            suggestion_type=suggestion["suggestion_type"],
+            suggestion_value=outcome_value,
+            outcome="rejected",
+            config_before=config_before,
+        )
+
+        # Update profile stats
+        increment_profile_stats(
+            conn,
+            user_id=user_id,
+            suggestion_type=suggestion["suggestion_type"],
+            outcome="rejected",
+        )
+
+        return {
+            "success": True,
+            "suggestion_id": suggestion_id,
+            "outcome_id": outcome_id,
+        }
+
+
+@app.post("/api/suggestions/accept-all")
+def api_accept_all_suggestions(request: Request):
+    """
+    Bulk accept all pending suggestions.
+
+    Returns per-suggestion results for partial success.
+    Auth required.
+    """
+    with db_conn() as conn:
+        user = get_current_user(request, conn)
+        if not user:
+            raise HTTPException(status_code=401, detail="Authentication required")
+
+        user_id = user["user_id"]
+
+        # Get all pending suggestions
+        pending = get_pending_suggestions(conn, user_id=user_id, status="pending")
+
+        results = []
+        accepted_count = 0
+
+        for suggestion in pending:
+            suggestion_id = suggestion["suggestion_id"]
+
+            # Re-check status and ownership (in case concurrent modification)
+            current = get_suggestion_by_id(conn, suggestion_id=suggestion_id)
+            if not current or current["status"] != "pending":
+                results.append({
+                    "suggestion_id": suggestion_id,
+                    "status": "failed",
+                    "error": "already_resolved",
+                    "current_status": current["status"] if current else "not_found",
+                })
+                continue
+
+            # Re-validate user_id (security hardening)
+            if current["user_id"] != user_id:
+                results.append({
+                    "suggestion_id": suggestion_id,
+                    "status": "failed",
+                    "error": "not_owned",
+                })
+                continue
+
+            # Get current config
+            current_config = get_user_config(conn, user_id=user_id)
+            config_before = current_config if current_config else {}
+            config_after = copy.deepcopy(config_before)
+
+            suggestion_type = suggestion["suggestion_type"]
+            target_key = suggestion["target_key"]
+            suggested_value = suggestion["suggested_value"]
+
+            # Apply change
+            if suggestion_type == "add_topic":
+                topics = config_after.get("topics", [])
+                if suggested_value not in topics:
+                    topics.append(suggested_value)
+                config_after["topics"] = topics
+
+            elif suggestion_type == "remove_topic":
+                topics = config_after.get("topics", [])
+                if suggested_value in topics:
+                    topics.remove(suggested_value)
+                config_after["topics"] = topics
+
+            elif suggestion_type in ("boost_source", "reduce_source"):
+                # Guard: target_key required for source suggestions
+                if not target_key:
+                    update_suggestion_status(conn, suggestion_id=suggestion_id, status="rejected")
+                    insert_outcome(
+                        conn,
+                        suggestion_id=suggestion_id,
+                        user_id=user_id,
+                        suggestion_type=suggestion_type,
+                        suggestion_value=suggested_value,
+                        outcome="rejected",
+                        config_before=config_before,
+                    )
+                    results.append({
+                        "suggestion_id": suggestion_id,
+                        "status": "rejected",
+                        "error": "missing_target_key",
+                    })
+                    continue
+                try:
+                    weight = float(suggested_value)
+                except (ValueError, TypeError):
+                    update_suggestion_status(conn, suggestion_id=suggestion_id, status="rejected")
+                    insert_outcome(
+                        conn,
+                        suggestion_id=suggestion_id,
+                        user_id=user_id,
+                        suggestion_type=suggestion_type,
+                        suggestion_value=target_key,
+                        outcome="rejected",
+                        config_before=config_before,
+                    )
+                    results.append({
+                        "suggestion_id": suggestion_id,
+                        "status": "rejected",
+                        "error": "invalid_weight",
+                        "value": suggested_value,
+                    })
+                    continue
+                source_weights = config_after.get("source_weights", {})
+                source_weights[target_key] = weight
+                config_after["source_weights"] = source_weights
+
+            # Save config
+            upsert_user_config(conn, user_id=user_id, config=config_after)
+
+            # Update status
+            update_suggestion_status(conn, suggestion_id=suggestion_id, status="accepted")
+
+            # Outcome value
+            outcome_value = target_key if target_key else suggested_value
+
+            # Insert outcome
+            insert_outcome(
+                conn,
+                suggestion_id=suggestion_id,
+                user_id=user_id,
+                suggestion_type=suggestion_type,
+                suggestion_value=outcome_value,
+                outcome="accepted",
+                config_before=config_before,
+                config_after=config_after,
+                evidence_summary=suggestion["evidence_items"],
+            )
+
+            # Update profile stats
+            increment_profile_stats(
+                conn,
+                user_id=user_id,
+                suggestion_type=suggestion_type,
+                outcome="accepted",
+            )
+
+            results.append({
+                "suggestion_id": suggestion_id,
+                "status": "accepted",
+            })
+            accepted_count += 1
+
+        return {
+            "success": True,
+            "accepted_count": accepted_count,
+            "results": results,
+        }
 
 
 @app.exception_handler(RequestValidationError)

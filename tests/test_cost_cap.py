@@ -113,24 +113,24 @@ class TestGetDailyRefusalCounts:
 class TestCostCapEnvVar:
     """Tests for LLM_DAILY_CAP_USD environment variable."""
 
-    def test_default_cap_is_one_dollar(self, monkeypatch):
-        """Default cap should be $1.00 when env var not set."""
+    def test_default_cap_is_five_dollars(self, monkeypatch):
+        """Default cap should be $5.00 when env var not set (ingest budget)."""
         monkeypatch.delenv("LLM_DAILY_CAP_USD", raising=False)
         # Re-import to pick up env var
         import importlib
         import src.clients.llm_openai as llm_module
         importlib.reload(llm_module)
 
-        assert llm_module.LLM_DAILY_CAP_USD == 1.00
+        assert llm_module.LLM_DAILY_CAP_USD == 5.00
 
     def test_cap_from_env_var(self, monkeypatch):
         """Cap should be read from env var."""
-        monkeypatch.setenv("LLM_DAILY_CAP_USD", "5.00")
+        monkeypatch.setenv("LLM_DAILY_CAP_USD", "2.50")
         import importlib
         import src.clients.llm_openai as llm_module
         importlib.reload(llm_module)
 
-        assert llm_module.LLM_DAILY_CAP_USD == 5.00
+        assert llm_module.LLM_DAILY_CAP_USD == 2.50
 
 
 class TestDebugCostsEndpoint:

@@ -17,13 +17,13 @@ from src.repo import (
     get_cached_summary,
     insert_cached_summary,
     update_run_llm_stats,
-    get_active_source_weights,
     get_positive_feedback_items,
     get_all_historical_items,
 )
 from src.ai_score import build_tfidf_model, compute_ai_scores
-from src.scoring import RankConfig, rank_items
+from src.scoring import rank_items
 from src.explain import explain_item
+from src.views import get_effective_rank_config
 from src.artifacts import render_digest_html
 from src.clients.llm_openai import summarize, MODEL
 from src.grounding import validate_grounding
@@ -53,9 +53,8 @@ def main(argv: list[str] | None = None) -> int:
         run = get_run_by_day(conn, day=day, user_id=user_id)
         items = get_news_items_by_date(conn, day=day)
 
-        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
-        source_weights = get_active_source_weights(conn, user_id=user_id)
-        cfg = RankConfig(source_weights=source_weights)
+        # Load effective rank config (merges defaults + user_config + active_weights)
+        cfg = get_effective_rank_config(conn, user_id=user_id)
 
         # Compute ai_scores (Milestone 3c)
         # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only

@@ -227,3 +227,183 @@ def test_config_page_returns_html(client: TestClient):
     assert "text/html" in resp.headers["content-type"]
     assert "Config" in resp.text
     assert "Coming Soon" in resp.text
+
+
+# --- /ui/suggestions tests ---
+
+def test_suggestions_page_requires_auth(client: TestClient):
+    """Suggestions page redirects to home if not authenticated."""
+    resp = client.get("/ui/suggestions", follow_redirects=False)
+
+    assert resp.status_code == 302
+    assert resp.headers["location"] == "/"
+
+
+def test_suggestions_page_shows_empty_state(tmp_path, monkeypatch):
+    """Suggestions page shows empty state when no pending suggestions."""
+    from src.auth import hash_password
+    from src.repo import create_user
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
+
+    # Create user and login
+    conn = get_conn()
+    init_db(conn)
+    create_user(conn, email="test@example.com", password_hash=hash_password("password"))
+    conn.close()
+
+    client = TestClient(app)
+    resp = client.post("/auth/login", params={"email": "test@example.com", "password": "password"})
+    assert resp.status_code == 200
+
+    # Now fetch suggestions page
+    resp = client.get("/ui/suggestions")
+
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers["content-type"]
+    assert "No suggestions yet" in resp.text
+    assert "Generate Suggestions" in resp.text
+
+
+def test_suggestions_page_shows_cards(tmp_path, monkeypatch):
+    """Suggestions page shows cards when pending suggestions exist."""
+    from src.auth import hash_password
+    from src.repo import create_user, insert_suggestion
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
+
+    conn = get_conn()
+    init_db(conn)
+    user_id = create_user(conn, email="test@example.com", password_hash=hash_password("password"))
+
+    # Create a suggestion
+    insert_suggestion(
+        conn,
+        user_id=user_id,
+        suggestion_type="boost_source",
+        field="source_weights",
+        target_key="TechCrunch",
+        current_value="1.0",
+        suggested_value="1.3",
+        evidence_items=[{"url": "a", "title": "a"}] * 3,
+        reason="You liked 8/10 TechCrunch articles",
+    )
+    conn.close()
+
+    client = TestClient(app)
+    resp = client.post("/auth/login", params={"email": "test@example.com", "password": "password"})
+    assert resp.status_code == 200
+
+    resp = client.get("/ui/suggestions")
+
+    assert resp.status_code == 200
+    assert "Show me more from TechCrunch" in resp.text
+    assert "You liked 8/10 TechCrunch articles" in resp.text
+    assert "Based on 3 articles" in resp.text
+    assert "Accept" in resp.text
+    assert "Reject" in resp.text
+
+
+def test_suggestions_page_target_key_none_fallback(tmp_path, monkeypatch):
+    """Source suggestion with target_key=None shows 'Unknown source' fallback."""
+    from src.auth import hash_password
+    from src.repo import create_user, insert_suggestion
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
+
+    conn = get_conn()
+    init_db(conn)
+    user_id = create_user(conn, email="test@example.com", password_hash=hash_password("password"))
+
+    # Legacy suggestion with no target_key
+    insert_suggestion(
+        conn,
+        user_id=user_id,
+        suggestion_type="boost_source",
+        field="source_weights",
+        target_key=None,
+        current_value="1.0",
+        suggested_value="1.3",
+        evidence_items=[{"url": "a", "title": "a"}] * 3,
+        reason="Legacy suggestion",
+    )
+    conn.close()
+
+    client = TestClient(app)
+    resp = client.post("/auth/login", params={"email": "test@example.com", "password": "password"})
+    assert resp.status_code == 200
+
+    resp = client.get("/ui/suggestions")
+
+    assert resp.status_code == 200
+    assert "Unknown source" in resp.text
+    assert "Show me more from None" not in resp.text
+
+
+def test_suggestions_page_missing_values_hides_boost_label(tmp_path, monkeypatch):
+    """Source suggestion with missing current_value hides boost label."""
+    from src.auth import hash_password
+    from src.repo import create_user, insert_suggestion
+
+    db_path = tmp_path / "test.db"
+    monkeypatch.setenv("NEWS_DB_PATH", str(db_path))
+
+    conn = get_conn()
+    init_db(conn)
+    user_id = create_user(conn, email="test@example.com", password_hash=hash_password("password"))
+
+    # Suggestion with missing current_value
+    insert_suggestion(
+        conn,
+        user_id=user_id,
+        suggestion_type="boost_source",
+        field="source_weights",
+        target_key="Reuters",
+        current_value=None,
+        suggested_value="1.3",
+        evidence_items=[{"url": "a", "title": "a"}] * 3,
+        reason="Test suggestion",
+    )
+    conn.close()
+
+    client = TestClient(app)
+    resp = client.post("/auth/login", params={"email": "test@example.com", "password": "password"})
+    assert resp.status_code == 200
+
+    resp = client.get("/ui/suggestions")
+
+    assert resp.status_code == 200
+    assert "Show me more from Reuters" in resp.text
+    # Boost label should NOT appear when current_value is missing
+    assert "Small boost" not in resp.text
+    assert "Moderate boost" not in resp.text
+    assert "Big boost" not in resp.text
+
+
+def test_boost_label_helpers():
+    """Unit tests for _compute_boost_label and _format_weight_details."""
+    from src.main import _compute_boost_label, _format_weight_details
+
+    # Both values present and numeric
+    assert _compute_boost_label("1.0", "1.1", "boost") == "Small boost"
+    assert _compute_boost_label("1.0", "1.2", "boost") == "Moderate boost"
+    assert _compute_boost_label("1.0", "1.4", "boost") == "Big boost"
+    assert _compute_boost_label("1.0", "0.8", "reduction") == "Moderate reduction"
+
+    # Missing values → None
+    assert _compute_boost_label(None, "1.3", "boost") is None
+    assert _compute_boost_label("1.0", None, "boost") is None
+    assert _compute_boost_label(None, None, "boost") is None
+
+    # Non-numeric → None
+    assert _compute_boost_label("abc", "1.3", "boost") is None
+    assert _compute_boost_label("1.0", "xyz", "boost") is None
+
+    # Details formatting
+    assert _format_weight_details("1.0", "1.3") == "Current: 1.0 → Proposed: 1.3"
+    assert _format_weight_details(None, "1.3") == "Weight adjustment"
+    assert _format_weight_details("1.0", None) == "Weight adjustment"
+    assert _format_weight_details("abc", "1.3") == "Weight adjustment"

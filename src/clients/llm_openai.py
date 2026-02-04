@@ -25,7 +25,7 @@ COST_PER_1K_PROMPT = 0.00015
 COST_PER_1K_COMPLETION = 0.0006
 
 # Daily spend cap (default $1.00, configurable via env var)
-LLM_DAILY_CAP_USD = float(os.environ.get("LLM_DAILY_CAP_USD", "1.00"))
+LLM_DAILY_CAP_USD = float(os.environ.get("LLM_DAILY_CAP_USD", "5.00"))
 
 SYSTEM_PROMPT = """You are a news summarization assistant. Given a news item and evidence, produce a JSON object.       
 

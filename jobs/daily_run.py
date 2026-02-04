@@ -9,7 +9,7 @@ import json
 import os
 import time
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, time as dt_time, timezone
 
 from src.db import get_conn, init_db
 from src.error_codes import PARSE_ERROR
@@ -21,8 +21,9 @@ from src.rss_parse import parse_rss
 from src.weekly_report import write_weekly_report
 
 # Ranking + explanation
-from src.scoring import RankConfig, rank_items
+from src.scoring import rank_items
 from src.explain import explain_item
+from src.views import get_effective_rank_config
 
 # LLM summarization + caching
 from src.clients.llm_openai import summarize, MODEL
@@ -52,7 +53,6 @@ from src.repo import (
     update_run_llm_stats,
     get_positive_feedback_items,
     get_all_historical_items,
-    get_active_source_weights,
 )
 from src.ai_score import build_tfidf_model, compute_ai_scores
 
@@ -153,6 +153,19 @@ def run_for_user(day: str, mode: str, force: bool, user_id: str | None) -> int:
                     with open(path, "r", encoding="utf-8") as f:
                         xml_content = f.read()
                     items = parse_rss(xml_content, source=source)
+
+                    # Override fixture dates to match --date (preserves time-of-day)
+                    fixture_day = date.fromisoformat(day)
+                    for item in items:
+                        if item.published_at:
+                            if item.published_at.tzinfo is None:
+                                t = item.published_at.time()
+                            else:
+                                t = item.published_at.astimezone(timezone.utc).time()
+                        else:
+                            t = dt_time(12, 0, 0)
+                        item.published_at = datetime.combine(fixture_day, t, tzinfo=timezone.utc)
+
                     all_items.extend(items)
                     log_event("fixture_loaded", run_id=run_id, path=path, items=len(items))
                 except FileNotFoundError:
@@ -240,9 +253,8 @@ def run_for_user(day: str, mode: str, force: bool, user_id: str | None) -> int:
         # =====================================================================
         ranked = []
         explanations = []
-        # Load dynamic source weights (user-scoped, Milestone 3b + 4)
-        source_weights = get_active_source_weights(conn, user_id=user_id)
-        cfg = RankConfig(source_weights=source_weights)
+        # Load effective rank config (merges defaults + user_config + active_weights)
+        cfg = get_effective_rank_config(conn, user_id=user_id)
         try:
             # Compute ai_scores (Milestone 3c)
             # Fit TF-IDF on all historical items (richer vocabulary), similarity against positives only

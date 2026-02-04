@@ -241,6 +241,83 @@ def init_db(conn: sqlite3.Connection) -> None:
         )
     """)
 
+    # config_suggestions table - AI advisor suggestions (Milestone 4.5)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS config_suggestions (
+            suggestion_id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL,
+            suggestion_type TEXT NOT NULL,
+            field TEXT NOT NULL,
+            target_key TEXT,
+            current_value TEXT,
+            suggested_value TEXT NOT NULL,
+            evidence_items TEXT NOT NULL,
+            evidence_count INTEGER NOT NULL,
+            reason TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            resolved_at TEXT,
+            FOREIGN KEY (user_id) REFERENCES users(user_id)
+        )
+    """)
+
+    # Idempotent migration: add target_key column if missing (for existing DBs)
+    try:
+        conn.execute("ALTER TABLE config_suggestions ADD COLUMN target_key TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+
+    # suggestion_outcomes table - rich snapshots for learning (Milestone 4.5)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS suggestion_outcomes (
+            outcome_id INTEGER PRIMARY KEY,
+            suggestion_id INTEGER NOT NULL,
+            user_id TEXT NOT NULL,
+            suggestion_type TEXT NOT NULL,
+            suggestion_value TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            user_reason TEXT,
+            config_before TEXT,
+            config_after TEXT,
+            evidence_summary TEXT,
+            created_at TEXT NOT NULL,
+            decided_at TEXT,
+            FOREIGN KEY (suggestion_id) REFERENCES config_suggestions(suggestion_id)
+        )
+    """)
+
+    # user_preference_profiles table - computed patterns (Milestone 4.5)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_preference_profiles (
+            profile_id INTEGER PRIMARY KEY,
+            user_id TEXT NOT NULL UNIQUE,
+            acceptance_stats TEXT NOT NULL,
+            patterns TEXT NOT NULL,
+            trends TEXT,
+            total_outcomes INTEGER DEFAULT 0,
+            last_outcome_at TEXT,
+            computed_at TEXT NOT NULL
+        )
+    """)
+
+    # Indexes for config_suggestions (Milestone 4.5)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_suggestions_user
+        ON config_suggestions(user_id, status)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_outcomes_user
+        ON suggestion_outcomes(user_id)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_outcomes_type
+        ON suggestion_outcomes(suggestion_type, outcome)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_outcomes_date
+        ON suggestion_outcomes(created_at)
+    """)
+
     conn.commit()
 
     # Idempotent migration: add run_type column if missing (for existing DBs)

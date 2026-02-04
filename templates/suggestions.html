@@ -1,0 +1,636 @@
+{% extends "_base.html" %}
+
+{% block title %}Suggestions — News Digest{% endblock %}
+
+{% block head %}
+<style>
+    .page-header {
+        margin-bottom: 28px;
+        padding-bottom: 16px;
+        border-bottom: 1px solid var(--color-border);
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+    }
+    .page-header-text h1 {
+        margin: 0 0 8px 0;
+        font-size: 26px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+    }
+    .page-subtitle {
+        color: var(--color-text-secondary);
+        font-size: 15px;
+        margin: 0;
+    }
+
+    /* Accept All button */
+    .accept-all-btn {
+        padding: 10px 20px;
+        background: var(--color-link);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.15s;
+    }
+    .accept-all-btn:hover:not(:disabled) {
+        background: var(--color-link-hover);
+    }
+    .accept-all-btn:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+
+    /* Empty state */
+    .empty-state {
+        text-align: center;
+        padding: 60px 24px;
+        background: var(--color-summary-bg);
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+    }
+    .empty-state-icon {
+        font-size: 48px;
+        margin-bottom: 16px;
+    }
+    .empty-state h2 {
+        font-size: 20px;
+        color: var(--color-text-primary);
+        margin: 0 0 8px 0;
+    }
+    .empty-state p {
+        color: var(--color-text-secondary);
+        font-size: 15px;
+        margin: 0 0 24px 0;
+        max-width: 400px;
+        margin-left: auto;
+        margin-right: auto;
+    }
+    .generate-btn {
+        padding: 12px 24px;
+        background: var(--color-link);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 500;
+        transition: background 0.15s;
+    }
+    .generate-btn:hover:not(:disabled) {
+        background: var(--color-link-hover);
+    }
+    .generate-btn:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+    }
+
+    /* Status message */
+    .status-message {
+        text-align: center;
+        padding: 16px;
+        margin-top: 16px;
+        border-radius: 6px;
+        font-size: 14px;
+    }
+    .status-message.info {
+        background: #e3f2fd;
+        color: #1565c0;
+    }
+    .status-message.warning {
+        background: var(--color-refusal-bg);
+        color: var(--color-refusal-text);
+    }
+    .status-message.error {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    /* Section headers */
+    .section-header {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--color-text-secondary);
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin: 24px 0 12px 0;
+        padding-bottom: 8px;
+        border-bottom: 1px solid var(--color-border-light);
+    }
+    .section-header:first-of-type {
+        margin-top: 0;
+    }
+
+    /* Suggestion cards */
+    .suggestion-card {
+        border: 1px solid var(--color-border);
+        border-radius: 8px;
+        padding: 20px;
+        margin-bottom: 12px;
+        background: #fff;
+        transition: box-shadow 0.15s, border-color 0.15s;
+    }
+    .suggestion-card:hover {
+        box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+        border-color: #d0d0d0;
+    }
+    .suggestion-card.resolved {
+        opacity: 0.6;
+        pointer-events: none;
+    }
+
+    .card-header {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin-bottom: 12px;
+    }
+    .card-headline {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+    }
+    .card-icon {
+        font-size: 20px;
+    }
+    .card-title {
+        font-size: 16px;
+        font-weight: 600;
+        color: var(--color-text-primary);
+        margin: 0;
+    }
+    .boost-label {
+        font-size: 12px;
+        padding: 4px 10px;
+        background: #e8f5e9;
+        color: #2e7d32;
+        border-radius: 12px;
+        white-space: nowrap;
+    }
+    .boost-label.reduction {
+        background: #fff3e0;
+        color: #e65100;
+    }
+
+    .card-reason {
+        color: var(--color-text-body);
+        font-size: 14px;
+        line-height: 1.5;
+        margin-bottom: 12px;
+    }
+
+    .card-meta {
+        display: flex;
+        align-items: center;
+        gap: 16px;
+        margin-bottom: 16px;
+    }
+    .evidence-badge {
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        background: var(--color-border-light);
+        padding: 4px 10px;
+        border-radius: 12px;
+    }
+
+    /* Details toggle */
+    .details-toggle {
+        font-size: 13px;
+        color: var(--color-link);
+        background: none;
+        border: none;
+        cursor: pointer;
+        padding: 0;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+    }
+    .details-toggle:hover {
+        text-decoration: underline;
+    }
+    .details-content {
+        display: none;
+        margin-top: 12px;
+        padding: 12px;
+        background: var(--color-summary-bg);
+        border-radius: 6px;
+        font-size: 13px;
+        color: var(--color-text-secondary);
+        font-family: monospace;
+    }
+    .details-content.show {
+        display: block;
+    }
+
+    /* Card actions */
+    .card-actions {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding-top: 16px;
+        border-top: 1px solid var(--color-border-light);
+    }
+    .action-buttons {
+        display: flex;
+        gap: 8px;
+    }
+    .reject-btn {
+        padding: 8px 16px;
+        background: #fff;
+        color: var(--color-text-secondary);
+        border: 1px solid var(--color-border);
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        transition: all 0.15s;
+    }
+    .reject-btn:hover:not(:disabled) {
+        background: #ffebee;
+        border-color: #f44336;
+        color: #c62828;
+    }
+    .accept-btn {
+        padding: 8px 16px;
+        background: var(--color-link);
+        color: #fff;
+        border: none;
+        border-radius: 6px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: 500;
+        transition: background 0.15s;
+    }
+    .accept-btn:hover:not(:disabled) {
+        background: var(--color-link-hover);
+    }
+    .accept-btn:disabled,
+    .reject-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+    }
+
+    /* Resolved states */
+    .resolved-message {
+        text-align: center;
+        padding: 16px;
+        font-size: 14px;
+        border-radius: 6px;
+        margin-bottom: 12px;
+    }
+    .resolved-message.accepted {
+        background: #e8f5e9;
+        color: #2e7d32;
+    }
+    .resolved-message.rejected {
+        background: #fafafa;
+        color: var(--color-text-secondary);
+    }
+    .resolved-message.error {
+        background: #ffebee;
+        color: #c62828;
+    }
+
+    /* All done state */
+    .all-done {
+        text-align: center;
+        padding: 40px 24px;
+        background: #e8f5e9;
+        border: 1px solid #c8e6c9;
+        border-radius: 8px;
+        color: #2e7d32;
+    }
+    .all-done-icon {
+        font-size: 36px;
+        margin-bottom: 12px;
+    }
+    .all-done h2 {
+        font-size: 18px;
+        margin: 0 0 8px 0;
+    }
+    .all-done p {
+        font-size: 14px;
+        margin: 0;
+        opacity: 0.8;
+    }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <div class="page-header-text">
+        <h1>Suggestions</h1>
+        <p class="page-subtitle">Personalized recommendations based on your feedback</p>
+    </div>
+    {% if total_count > 1 %}
+    <button class="accept-all-btn" onclick="acceptAll()">Accept All</button>
+    {% endif %}
+</div>
+
+<div id="suggestions-container">
+{% if total_count == 0 %}
+    <!-- Empty state -->
+    <div class="empty-state">
+        <div class="empty-state-icon">💡</div>
+        <h2>No suggestions yet</h2>
+        <p>We'll analyze your recent feedback to suggest improvements to your news digest.</p>
+        <button class="generate-btn" onclick="generateSuggestions(this)">Generate Suggestions</button>
+        <div id="generate-status"></div>
+    </div>
+{% else %}
+    <!-- Suggestions list -->
+    <div id="cards-container">
+        {% if source_suggestions %}
+        <div class="section-header">Sources</div>
+        {% for s in source_suggestions %}
+        <div class="suggestion-card" data-suggestion-id="{{ s.suggestion_id }}">
+            <div class="card-header">
+                <div class="card-headline">
+                    <span class="card-icon">{{ s.icon }}</span>
+                    <h3 class="card-title">{{ s.headline }}</h3>
+                </div>
+                {% if s.boost_label %}
+                <span class="boost-label {{ 'reduction' if 'reduction' in s.boost_label else '' }}">{{ s.boost_label }}</span>
+                {% endif %}
+            </div>
+            <p class="card-reason">{{ s.reason }}</p>
+            <div class="card-meta">
+                <span class="evidence-badge">Based on {{ s.evidence_count }} article{{ 's' if s.evidence_count != 1 else '' }}</span>
+            </div>
+            <div class="card-actions">
+                <button class="details-toggle" onclick="toggleDetails(this)">
+                    Details <span class="toggle-arrow">▼</span>
+                </button>
+                <div class="action-buttons">
+                    <button class="reject-btn" onclick="rejectSuggestion({{ s.suggestion_id }}, this)">Reject</button>
+                    <button class="accept-btn" onclick="acceptSuggestion({{ s.suggestion_id }}, this)">Accept</button>
+                </div>
+            </div>
+            <div class="details-content">{{ s.details_text }}</div>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        {% if topic_suggestions %}
+        <div class="section-header">Topics</div>
+        {% for s in topic_suggestions %}
+        <div class="suggestion-card" data-suggestion-id="{{ s.suggestion_id }}">
+            <div class="card-header">
+                <div class="card-headline">
+                    <span class="card-icon">{{ s.icon }}</span>
+                    <h3 class="card-title">{{ s.headline }}</h3>
+                </div>
+            </div>
+            <p class="card-reason">{{ s.reason }}</p>
+            <div class="card-meta">
+                <span class="evidence-badge">Based on {{ s.evidence_count }} article{{ 's' if s.evidence_count != 1 else '' }}</span>
+            </div>
+            <div class="card-actions">
+                <button class="details-toggle" onclick="toggleDetails(this)">
+                    Details <span class="toggle-arrow">▼</span>
+                </button>
+                <div class="action-buttons">
+                    <button class="reject-btn" onclick="rejectSuggestion({{ s.suggestion_id }}, this)">Reject</button>
+                    <button class="accept-btn" onclick="acceptSuggestion({{ s.suggestion_id }}, this)">Accept</button>
+                </div>
+            </div>
+            <div class="details-content">{{ s.details_text }}</div>
+        </div>
+        {% endfor %}
+        {% endif %}
+    </div>
+
+    <!-- All done state (hidden initially) -->
+    <div id="all-done" class="all-done" style="display: none;">
+        <div class="all-done-icon">✓</div>
+        <h2>All done!</h2>
+        <p>Your preferences have been updated.</p>
+    </div>
+{% endif %}
+</div>
+
+<script>
+function toggleDetails(btn) {
+    const card = btn.closest('.suggestion-card');
+    const details = card.querySelector('.details-content');
+    const arrow = btn.querySelector('.toggle-arrow');
+
+    if (details.classList.contains('show')) {
+        details.classList.remove('show');
+        arrow.textContent = '▼';
+    } else {
+        details.classList.add('show');
+        arrow.textContent = '▲';
+    }
+}
+
+async function generateSuggestions(btn) {
+    const statusDiv = document.getElementById('generate-status');
+    btn.disabled = true;
+    btn.textContent = 'Generating...';
+    statusDiv.innerHTML = '';
+
+    try {
+        const resp = await fetch('/api/suggestions/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await resp.json();
+
+        if (data.status === 'ready') {
+            statusDiv.innerHTML = '<div class="status-message info">Coming soon — the suggestion agent is not yet enabled.</div>';
+            btn.textContent = 'Generate Suggestions';
+            btn.disabled = false;
+        } else if (data.status === 'completed') {
+            window.location.reload();
+        } else if (data.status === 'blocked_pending' || data.status === 'already_generated') {
+            window.location.reload();
+        } else if (data.status === 'skipped') {
+            statusDiv.innerHTML = '<div class="status-message warning">Not enough feedback yet. Keep rating articles and check back later.</div>';
+            btn.textContent = 'Generate Suggestions';
+            btn.disabled = false;
+        } else if (data.status === 'budget_exceeded') {
+            if (data.suggestions_created > 0) {
+                window.location.reload();
+            } else {
+                statusDiv.innerHTML = '<div class="status-message warning">Daily suggestion limit reached. Try again tomorrow.</div>';
+                btn.textContent = 'Generate Suggestions';
+                btn.disabled = false;
+            }
+        } else if (data.status === 'agent_timeout') {
+            if (data.suggestions_created > 0) {
+                window.location.reload();
+            } else {
+                statusDiv.innerHTML = '<div class="status-message warning">Suggestion generation took too long. Please try again.</div>';
+                btn.textContent = 'Generate Suggestions';
+                btn.disabled = false;
+            }
+        } else if (data.status === 'agent_error') {
+            if (data.suggestions_created > 0) {
+                window.location.reload();
+            } else {
+                statusDiv.innerHTML = '<div class="status-message error">Something went wrong generating suggestions. Please try again.</div>';
+                btn.textContent = 'Generate Suggestions';
+                btn.disabled = false;
+            }
+        } else {
+            statusDiv.innerHTML = '<div class="status-message error">Something went wrong. Please try again.</div>';
+            btn.textContent = 'Generate Suggestions';
+            btn.disabled = false;
+        }
+    } catch (e) {
+        console.error('Generate failed:', e);
+        statusDiv.innerHTML = '<div class="status-message error">Something went wrong. Please try again.</div>';
+        btn.textContent = 'Generate Suggestions';
+        btn.disabled = false;
+    }
+}
+
+async function acceptSuggestion(suggestionId, btn) {
+    const card = btn.closest('.suggestion-card');
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+
+    try {
+        const resp = await fetch(`/api/suggestions/${suggestionId}/accept`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (resp.ok) {
+            replaceCardWithMessage(card, 'accepted', '✓ Applied');
+        } else {
+            const data = await resp.json();
+            const message = getErrorMessage(data.error || 'unknown');
+            replaceCardWithMessage(card, 'error', message);
+        }
+    } catch (e) {
+        console.error('Accept failed:', e);
+        replaceCardWithMessage(card, 'error', 'Something went wrong. Please try again.');
+    }
+
+    checkAllDone();
+}
+
+async function rejectSuggestion(suggestionId, btn) {
+    const card = btn.closest('.suggestion-card');
+    const buttons = card.querySelectorAll('button');
+    buttons.forEach(b => b.disabled = true);
+
+    try {
+        const resp = await fetch(`/api/suggestions/${suggestionId}/reject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (resp.ok) {
+            replaceCardWithMessage(card, 'rejected', '✗ Dismissed');
+        } else {
+            const data = await resp.json();
+            const message = getErrorMessage(data.error || 'unknown');
+            replaceCardWithMessage(card, 'error', message);
+        }
+    } catch (e) {
+        console.error('Reject failed:', e);
+        replaceCardWithMessage(card, 'error', 'Something went wrong. Please try again.');
+    }
+
+    checkAllDone();
+}
+
+async function acceptAll() {
+    const acceptAllBtn = document.querySelector('.accept-all-btn');
+    if (acceptAllBtn) {
+        acceptAllBtn.disabled = true;
+        acceptAllBtn.textContent = 'Accepting...';
+    }
+
+    try {
+        const resp = await fetch('/api/suggestions/accept-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        const data = await resp.json();
+
+        if (resp.ok && data.results) {
+            // Process per-item results
+            for (const result of data.results) {
+                const card = document.querySelector(`[data-suggestion-id="${result.suggestion_id}"]`);
+                if (!card) continue;
+
+                if (result.status === 'accepted') {
+                    replaceCardWithMessage(card, 'accepted', '✓ Applied');
+                } else if (result.status === 'rejected') {
+                    // Auto-rejected due to invalid data
+                    const errorMsg = getErrorMessage(result.error || 'unknown');
+                    replaceCardWithMessage(card, 'error', errorMsg);
+                } else if (result.status === 'failed') {
+                    const errorMsg = getErrorMessage(result.error || 'unknown');
+                    replaceCardWithMessage(card, 'error', errorMsg);
+                }
+            }
+        }
+    } catch (e) {
+        console.error('Accept all failed:', e);
+    }
+
+    if (acceptAllBtn) {
+        acceptAllBtn.style.display = 'none';
+    }
+
+    checkAllDone();
+}
+
+function replaceCardWithMessage(card, type, message) {
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `resolved-message ${type}`;
+    msgDiv.textContent = message;
+
+    card.replaceWith(msgDiv);
+
+    // Fade out after 2 seconds
+    setTimeout(() => {
+        msgDiv.style.transition = 'opacity 0.3s';
+        msgDiv.style.opacity = '0';
+        setTimeout(() => msgDiv.remove(), 300);
+    }, 2000);
+}
+
+function getErrorMessage(errorCode) {
+    const messages = {
+        'already_resolved': 'Already handled',
+        'invalid_weight': "Couldn't apply this change",
+        'missing_target_key': 'This suggestion is no longer valid',
+        'not_owned': 'This suggestion is no longer valid',
+        'not_found': 'Suggestion not found'
+    };
+    return messages[errorCode] || 'Something went wrong. Please try again.';
+}
+
+function checkAllDone() {
+    const remainingCards = document.querySelectorAll('.suggestion-card');
+    const remainingMessages = document.querySelectorAll('.resolved-message');
+
+    // Check if all cards are gone (or will be gone after fade)
+    if (remainingCards.length === 0) {
+        // Wait for any remaining messages to fade
+        setTimeout(() => {
+            const cardsContainer = document.getElementById('cards-container');
+            const allDone = document.getElementById('all-done');
+            const acceptAllBtn = document.querySelector('.accept-all-btn');
+
+            if (cardsContainer) cardsContainer.style.display = 'none';
+            if (allDone) allDone.style.display = 'block';
+            if (acceptAllBtn) acceptAllBtn.style.display = 'none';
+
+            // Hide section headers
+            document.querySelectorAll('.section-header').forEach(h => h.style.display = 'none');
+        }, 2500);
+    }
+}
+</script>
+{% endblock %}

@@ -31,3 +31,8 @@ IMPORTANT:
 - Be specific in "How to Fix" - include the exact parameter or function call needed
 - Risk levels: HIGH (security/data), MEDIUM (correctness), LOW (style/minor)
 - If agent-findings.md does not exist or is empty, write a summary noting no findings
+
+Do NOT include:
+- "Previously Fixed Issues" or historical fix lists
+- Anything resolved in prior runs
+- Only report issues found THIS run

@@ -240,18 +240,23 @@ def get_effective_rank_config(conn, *, user_id: str | None = None) -> RankConfig
     # Start with defaults
     cfg_dict = RankConfig().model_dump()
 
-    # Overlay user config if provided
+    # Overlay active source weights (learned from feedback, Milestone 3b)
+    # These are applied first so user_config can override them
+    active_weights = get_active_source_weights(conn, user_id=user_id)
+    cfg_dict["source_weights"] = active_weights
+
+    # Overlay user config if provided (explicit overrides take precedence)
     if user_id:
         user_config = get_user_config(conn, user_id=user_id)
         if user_config:
             # Merge user overrides (only specified fields)
             for key, value in user_config.items():
                 if key in cfg_dict and value is not None:
-                    cfg_dict[key] = value
-
-    # Overlay active source weights (user-scoped)
-    source_weights = get_active_source_weights(conn, user_id=user_id)
-    cfg_dict["source_weights"] = source_weights
+                    if key == "source_weights" and isinstance(value, dict):
+                        # Merge source weights: user overrides specific sources
+                        cfg_dict["source_weights"] = {**cfg_dict["source_weights"], **value}
+                    else:
+                        cfg_dict[key] = value
 
     # Enforce bounds on ai_score_alpha
     cfg_dict["ai_score_alpha"] = max(0.0, min(0.2, cfg_dict.get("ai_score_alpha", 0.1)))
